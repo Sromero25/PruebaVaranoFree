@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Taller de Calzado</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="src/styles/main.css" />
+</head>
+<body>
+<div class="app" id="app">
+
+  <!-- ============ BARRA SUPERIOR (solo móvil/tablet) ============ -->
+  <header class="topbar">
+    <button class="hamburger" id="btn-menu" aria-label="Abrir menú" aria-controls="sidebar" aria-expanded="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+    </button>
+    <strong>Taller de Calzado</strong>
+  </header>
+  <div class="overlay" id="overlay"></div>
+
+  <!-- ============ SIDEBAR ============ -->
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="brand-logo">TC</div>
+      <div><strong>Taller de Calzado</strong><small>Control de negocio</small></div>
+    </div>
+    <nav class="nav" aria-label="Principal">
+      <button class="nav-link" data-vista="inicio" aria-current="page">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+        Inicio
+      </button>
+      <button class="nav-link" data-vista="ventas">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg>
+        Ventas
+      </button>
+      <button class="nav-link" data-vista="compras">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M2 3h3l2.7 12.4a2 2 0 0 0 2 1.6h7.7a2 2 0 0 0 2-1.5L21 8H6"/></svg>
+        Compras
+      </button>
+      <button class="nav-link" data-vista="inventario">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>
+        Inventario
+      </button>
+      <button class="nav-link" data-vista="resumen">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h4"/></svg>
+        Resumen del mes
+      </button>
+    </nav>
+    <div class="sidebar-foot">Datos guardados en este navegador</div>
+  </aside>
+
+  <!-- ============ CONTENIDO ============ -->
+  <main class="main">
+
+    <!-- ---------- INICIO / DASHBOARD ---------- -->
+    <section class="vista activa" id="vista-inicio">
+      <div class="page-head">
+        <div><h1>Inicio</h1><p>Así va el taller este mes.</p></div>
+        <button class="btn" data-ir="ventas">+ Nueva venta</button>
+      </div>
+
+      <div class="grid grid-kpi">
+        <div class="card kpi"><div class="label">Ventas del mes</div><div class="value num" id="txt-ventas">$0</div></div>
+        <div class="card kpi"><div class="label">Compras del mes</div><div class="value num" id="txt-compras">$0</div></div>
+        <div class="card kpi destacado"><div class="label">Utilidad neta</div><div class="value num" id="txt-utilidad">$0</div></div>
+        <div class="card kpi"><div class="label">Pares en bodega</div><div class="value num" id="txt-pares">0</div></div>
+      </div>
+
+      <div class="grid grid-main mt">
+        <div class="card">
+          <div class="card-head"><h2>Últimas ventas</h2><button class="btn btn-secundario btn-sm" data-ir="ventas">Ver todas</button></div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Fecha</th><th>Cliente</th><th>Modelo</th><th class="right">Cant.</th><th class="right">Total</th></tr></thead>
+              <tbody id="tabla-ultimas-ventas"><tr><td colspan="5" class="empty">Aún no hay ventas registradas.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Stock bajo</h2></div>
+          <div id="lista-stock-bajo"><p class="muted">Sin alertas por ahora.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- VENTAS ---------- -->
+    <section class="vista" id="vista-ventas">
+      <div class="page-head"><div><h1>Ventas</h1><p>Registra y consulta las ventas de calzado.</p></div></div>
+      <div class="card">
+        <div class="card-head"><h2>Registrar venta</h2></div>
+        <form class="form" id="form-venta">
+          <div class="field"><label for="v-cliente">Cliente</label><select class="input" id="v-cliente" required></select></div>
+          <div class="field"><label for="v-modelo">Modelo</label><select class="input" id="v-modelo" required></select></div>
+          <div class="field"><label for="v-talla">Talla</label><select class="input" id="v-talla" required></select></div>
+          <div class="field"><label for="v-cantidad">Cantidad</label><input class="input" id="v-cantidad" type="number" min="1" value="1" required /><span class="hint" id="v-disponibles"></span></div>
+          <div class="field"><label for="v-precio">Precio unitario</label><input class="input" id="v-precio" type="number" min="0" step="0.01" required /></div>
+          <div class="form-actions">
+            <button type="reset" class="btn btn-secundario">Limpiar</button>
+            <button type="submit" class="btn" id="btn-vender">Guardar venta</button>
+          </div>
+        </form>
+        <details class="agregar">
+          <summary>¿Cliente nuevo? Agrégalo aquí</summary>
+          <form class="form" id="form-cliente">
+            <div class="field"><label for="n-nombre">Nombre</label><input class="input" id="n-nombre" required /></div>
+            <div class="field"><label for="n-apellido">Apellido</label><input class="input" id="n-apellido" required /></div>
+            <div class="field full"><label for="n-telefono">Teléfono (opcional)</label><input class="input" id="n-telefono" type="tel" /></div>
+            <div class="form-actions"><button class="btn btn-secundario" type="submit">Guardar cliente</button></div>
+          </form>
+        </details>
+      </div>
+      <div class="card mt">
+        <div class="card-head"><h2>Historial de ventas</h2></div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>Fecha</th><th>Cliente</th><th>Modelo</th><th>Talla</th><th class="right">Cant.</th><th class="right">P. unit.</th><th class="right">Total</th></tr></thead>
+            <tbody id="tabla-ventas"><tr><td colspan="7" class="empty">Aún no hay ventas registradas.</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- COMPRAS ---------- -->
+    <section class="vista" id="vista-compras">
+      <div class="page-head"><div><h1>Compras</h1><p>Materia prima comprada a proveedores.</p></div></div>
+      <div class="card">
+        <div class="card-head"><h2>Registrar compra</h2></div>
+        <form class="form" id="form-compra">
+          <div class="field"><label for="c-proveedor">Proveedor</label><select class="input" id="c-proveedor" required></select></div>
+          <div class="field"><label for="c-item">Material</label><select class="input" id="c-item" required></select></div>
+          <div class="field"><label for="c-cantidad">Cantidad</label><input class="input" id="c-cantidad" type="number" min="1" value="1" required /></div>
+          <div class="field"><label for="c-costo">Costo total</label><input class="input" id="c-costo" type="number" min="0" step="0.01" required /></div>
+          <div class="form-actions">
+            <button type="reset" class="btn btn-secundario">Limpiar</button>
+            <button type="submit" class="btn">Guardar compra</button>
+          </div>
+        </form>
+        <details class="agregar">
+          <summary>¿Proveedor o material nuevo? Agrégalo aquí</summary>
+          <form class="form" id="form-proveedor">
+            <div class="field"><label for="p-nombre">Nombre del proveedor</label><input class="input" id="p-nombre" required /></div>
+            <div class="field"><label for="p-telefono">Teléfono</label><input class="input" id="p-telefono" type="tel" required /></div>
+            <div class="field full"><label for="p-direccion">Dirección</label><input class="input" id="p-direccion" required /></div>
+            <div class="form-actions"><button class="btn btn-secundario" type="submit">Guardar proveedor</button></div>
+          </form>
+          <form class="form" id="form-material">
+            <div class="field"><label for="m-nombre">Nombre del material</label><input class="input" id="m-nombre" required /></div>
+            <div class="field"><label for="m-categoria">Categoría</label><input class="input" id="m-categoria" placeholder="Ej. Suela, Hilo, Pegamento" required /></div>
+            <div class="form-actions"><button class="btn btn-secundario" type="submit">Guardar material</button></div>
+          </form>
+        </details>
+      </div>
+      <div class="card mt">
+        <div class="card-head"><h2>Historial de compras</h2></div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>Fecha</th><th>Proveedor</th><th>Material</th><th class="right">Cant.</th><th class="right">Costo</th></tr></thead>
+            <tbody id="tabla-compras"><tr><td colspan="5" class="empty">Aún no hay compras registradas.</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- INVENTARIO ---------- -->
+    <section class="vista" id="vista-inventario">
+      <div class="page-head"><div><h1>Inventario</h1><p>Calzado terminado y materia prima.</p></div></div>
+      <div class="grid grid-2">
+        <div class="card">
+          <div class="card-head"><h2>Calzado por modelo y talla</h2></div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Modelo</th><th>Talla</th><th class="right">Stock</th><th>Estado</th></tr></thead>
+              <tbody id="lista-tallas"><tr><td colspan="4" class="empty">Sin existencias registradas.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Materia prima</h2></div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Material</th><th>Categoría</th><th class="right">Stock</th></tr></thead>
+              <tbody id="tabla-materia"><tr><td colspan="3" class="empty">Sin materiales registrados.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- RESUMEN DEL MES ---------- -->
+    <section class="vista" id="vista-resumen">
+      <div class="page-head">
+        <div><h1>Resumen del mes</h1><p>Cierre de ingresos, gastos y utilidad.</p></div>
+        <div class="acciones">
+          <input class="input input-auto" type="month" id="r-mes" aria-label="Mes a consultar" />
+          <button class="btn btn-secundario" id="btn-imprimir">Imprimir</button>
+        </div>
+      </div>
+      <div class="grid grid-2">
+        <div class="card">
+          <div class="card-head"><h2>Balance</h2></div>
+          <div class="resumen-linea"><span>Ventas (ingresos)</span><span class="num" id="r-ventas">$0</span></div>
+          <div class="resumen-linea"><span>Compras (gastos)</span><span class="num" id="r-compras">$0</span></div>
+          <div class="resumen-linea"><span>Pares vendidos</span><span class="num" id="r-pares">0</span></div>
+          <div class="resumen-linea total"><span>Utilidad neta</span><span class="num pos" id="r-utilidad">$0</span></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Modelos más vendidos</h2></div>
+          <div id="r-top-modelos"><p class="muted">Sin ventas en este mes.</p></div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script type="module" src="/src/index.ts"></script>
+</body>
+</html>
