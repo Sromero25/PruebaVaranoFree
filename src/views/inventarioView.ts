@@ -13,7 +13,7 @@
  */
 
 import { db } from '../db.js';
-import { UMBRAL_STOCK_BAJO } from '../utils.js';
+import { UMBRAL_STOCK_BAJO } from '../herramientas.js';
 
 /** Pinta la tabla de existencias de calzado (modelo, talla, stock, estado). */
 async function renderTablaCalzado(): Promise<void> {

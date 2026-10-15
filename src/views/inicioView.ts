@@ -15,7 +15,7 @@
 
 import { db } from '../db.js';
 import { obtenerBalanceDB } from '../servicios.js';
-import { formatearDinero, formatearFecha, UMBRAL_STOCK_BAJO } from '../utils.js';
+import { formatearDinero, formatearFecha, UMBRAL_STOCK_BAJO } from '../herramientas.js';
 
 /** Asigna texto a un elemento por id (si existe). */
 function setTexto(id: string, texto: string): void {

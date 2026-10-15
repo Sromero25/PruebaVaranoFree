@@ -15,7 +15,7 @@
  */
 
 import { db } from '../db.js';
-import { formatearDinero } from '../utils.js';
+import { formatearDinero } from '../herramientas.js';
 
 /** Cuántos modelos se muestran en el ranking. */
 const TOP_MODELOS = 5;

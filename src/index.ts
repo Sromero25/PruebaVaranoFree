@@ -20,7 +20,7 @@
  */
 
 import { cargarDatosIniciales } from './seed.js';
-import { notificar } from './utils.js';
+import { notificar } from './herramientas.js';
 import { inicializarNavegacion } from './navegacion.js';
 
 import { renderInicioView } from './views/inicioView.js';

@@ -18,7 +18,7 @@
 
 import { db } from '../db.js';
 import { registrarCompraDB } from '../servicios.js';
-import { notificar, formatearDinero, formatearFecha } from '../utils.js';
+import { notificar, formatearDinero, formatearFecha } from '../herramientas.js';
 
 // ----------------------------------------------------------------------------
 // Selectores
