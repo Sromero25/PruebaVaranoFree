@@ -29,7 +29,8 @@ import { montarVentasView, actualizarSelectoresVentas, renderVentasView } from '
 import { montarComprasView, actualizarSelectoresCompras, renderComprasView } from './views/comprasView.js';
 import { montarInventarioView, renderInventarioView } from './views/inventarioView.js';
 import { renderResumenView, inicializarResumenView } from './views/resumenView.js';
-import { montarAdminView, renderAdminView } from './views/adminVIew.js';
+import { montarAdminView, renderAdminView } from './views/adminView.js';
+import { sincronizarConBackend } from './sync.js';
 
 /** Vuelve a pintar tablas y métricas de todas las vistas. */
 async function refrescarTodo(): Promise<void> {
@@ -75,3 +76,4 @@ async function iniciar(): Promise<void> {
 }
 
 void iniciar();
+await sincronizarConBackend();
