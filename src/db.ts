@@ -18,20 +18,20 @@ import { Dexie, type Table, type Transaction } from 'dexie';
 export type Rol = 'admin' | 'normal';
 
 export interface Producto {
-  IDModelo?: number;
+  IDModelo: string;
   Modelo: string;
   PrecioBase: number;
 }
 
 export interface Tallas {
-  IDTalla?: number;
-  IDModelo: number;
+  IDTalla: string;
+  IDModelo: string;
   Talla: number;
   Stock: number;
 }
 
 export interface Cliente {
-  IDCliente?: number;
+  IDCliente: string;
   Nombre: string;
   Apellido: string;
   Telefono?: string;
@@ -40,22 +40,22 @@ export interface Cliente {
 
 /** Cabecera de venta. El detalle (tallas, cantidades, precios) está en `VentaDetalle`. */
 export interface Venta {
-  IDVenta?: number;
-  IDCliente: number;
+  IDVenta: string;
+  IDCliente: string;
   Fecha: Date;
   Total: number;
 }
 
 export interface VentaDetalle {
-  IDDetalle?: number;
-  IDVenta: number;
-  IDTalla: number;
+  IDDetalle: string;
+  IDVenta: string;
+  IDTalla: string;
   Cantidad: number;
   PrecioUnitario: number;
 }
 
 export interface Proveedor {
-  IDProveedor?: number;
+  IDProveedor: string;
   Nombre: string;
   Telefono: string;
   Direccion: string;
@@ -64,142 +64,79 @@ export interface Proveedor {
 
 /** Cabecera de compra. */
 export interface Compra {
-  IDCompra?: number;
-  IDProveedor: number;
+  IDCompra: string;
+  IDProveedor: string;
   Fecha: Date;
   Total: number;
 }
 
 /** Línea de compra: guarda el precio que tenía el material al momento de comprar. */
 export interface CompraDetalle {
-  IDDetalle?: number;
-  IDCompra: number;
-  IDItem: number;
+  IDDetalle: string;
+  IDCompra: string;
+  IDItem: string;
   Cantidad: number;
   PrecioUnitario: number;
 }
 
 export interface InventarioMPrima {
-  IDItem?: number;
+  IDItem: string;
   Nombre: string;
   Categoria: string;
-  /** Precio por unidad. Lo define el administrador. */
   Precio: number;
   Stock: number;
 }
 
 export interface Usuario {
-  IDUsuario?: number;
-  /** Nombre de acceso, siempre en minúsculas y único. */
+  IDUsuario: string;
   Usuario: string;
   Nombre: string;
   Rol: Rol;
-  /** Sal aleatoria (hex) y hash PBKDF2 de la contraseña. Nunca se guarda la contraseña. */
   Sal: string;
   Hash: string;
-  /** 1 = activo, 0 = desactivado. */
   Activo: 0 | 1;
 }
 
 /** Sesión guardada: sólo se almacena el hash del token, no el token. */
 export interface Sesion {
-  IDSesion?: number;
+  IDSesion: string;
   TokenHash: string;
-  IDUsuario: number;
-  /** Marca de tiempo (ms) en que expira. */
+  IDUsuario: string;
   Expira: number;
 }
 
 export class CalzadoDB extends Dexie {
-  productos!: Table<Producto, number>;
-  tallas!: Table<Tallas, number>;
-  clientes!: Table<Cliente, number>;
-  ventas!: Table<Venta, number>;
-  ventaDetalle!: Table<VentaDetalle, number>;
-  proveedores!: Table<Proveedor, number>;
-  compras!: Table<Compra, number>;
-  compraDetalle!: Table<CompraDetalle, number>;
-  materiaPrima!: Table<InventarioMPrima, number>;
-  usuarios!: Table<Usuario, number>;
-  sesiones!: Table<Sesion, number>;
+ productos!: Table<Producto, string>;
+  tallas!: Table<Tallas, string>;
+  clientes!: Table<Cliente, string>;
+  ventas!: Table<Venta, string>;
+  ventaDetalle!: Table<VentaDetalle, string>;
+  proveedores!: Table<Proveedor, string>;
+  compras!: Table<Compra, string>;
+  compraDetalle!: Table<CompraDetalle, string>;
+  materiaPrima!: Table<InventarioMPrima, string>;
+  usuarios!: Table<Usuario, string>;
+  sesiones!: Table<Sesion, string>;
 
   constructor() {
     super('TallerCalzadoDB');
 
     // Esquema original (necesario para poder migrar).
     this.version(1).stores({
-      productos: '++IDModelo, Modelo',
-      tallas: '++IDTalla, IDModelo, Talla',
-      clientes: '++IDCliente, Nombre, Apellido',
-      ventas: '++IDVenta, IDCliente, IDTalla, Fecha',
-      proveedores: '++IDProveedor, Nombre',
-      compras: '++IDCompra, IDProveedor, IDItem, Fecha',
-      materiaPrima: '++IDItem, Categoria'
+      productos: 'IDModelo, Modelo',
+      tallas: 'IDTalla, IDModelo, Talla, [IDModelo+Talla]',
+      clientes: 'IDCliente, Nombre, Apellido',
+      ventas: 'IDVenta, IDCliente, Fecha',
+      ventaDetalle: 'IDDetalle, IDVenta, IDTalla',
+      proveedores: 'IDProveedor, Nombre',
+      compras: 'IDCompra, IDProveedor, Fecha',
+      compraDetalle: 'IDDetalle, IDCompra, IDItem',
+      materiaPrima: 'IDItem, Categoria',
+      usuarios: 'IDUsuario, &Usuario',
+      sesiones: 'IDSesion, &TokenHash, IDUsuario, Expira'
     });
-
-    this.version(2)
-      .stores({
-        productos: '++IDModelo, Modelo',
-        tallas: '++IDTalla, IDModelo, Talla, [IDModelo+Talla]',
-        clientes: '++IDCliente, Nombre, Apellido',
-        ventas: '++IDVenta, IDCliente, Fecha',
-        ventaDetalle: '++IDDetalle, IDVenta, IDTalla',
-        proveedores: '++IDProveedor, Nombre',
-        compras: '++IDCompra, IDProveedor, Fecha',
-        compraDetalle: '++IDDetalle, IDCompra, IDItem',
-        materiaPrima: '++IDItem, Categoria',
-        usuarios: '++IDUsuario, &Usuario',
-        sesiones: '++IDSesion, &TokenHash, IDUsuario, Expira'
-      })
-      .upgrade(migrarV1aV2);
   }
 }
 
-/** Convierte ventas/compras de una sola línea (v1) al formato cabecera + detalle (v2). */
-async function migrarV1aV2(tx: Transaction): Promise<void> {
-  // --- Ventas ---
-  const ventasViejas = await tx.table('ventas').toArray();
-  for (const v of ventasViejas) {
-    await tx.table('ventaDetalle').add({
-      IDVenta: v.IDVenta,
-      IDTalla: v.IDTalla,
-      Cantidad: v.Cantidad,
-      PrecioUnitario: v.PrecioUnitario
-    });
-    await tx.table('ventas').put({
-      IDVenta: v.IDVenta,
-      IDCliente: v.IDCliente,
-      Fecha: v.Fecha,
-      Total: v.Cantidad * v.PrecioUnitario
-    });
-  }
-
-  // --- Compras ---
-  const comprasViejas = (await tx.table('compras').toArray()).sort(
-    (a, b) => new Date(a.Fecha).getTime() - new Date(b.Fecha).getTime()
-  );
-  const ultimoPrecio = new Map<number, number>();
-  for (const c of comprasViejas) {
-    const unitario = c.Cantidad > 0 ? c.Costo / c.Cantidad : 0;
-    await tx.table('compraDetalle').add({
-      IDCompra: c.IDCompra,
-      IDItem: c.IDItem,
-      Cantidad: c.Cantidad,
-      PrecioUnitario: unitario
-    });
-    await tx.table('compras').put({
-      IDCompra: c.IDCompra,
-      IDProveedor: c.IDProveedor,
-      Fecha: c.Fecha,
-      Total: c.Costo
-    });
-    ultimoPrecio.set(c.IDItem, unitario);
-  }
-
-  // --- Materia prima: precio inicial = último precio pagado (o 0 si nunca se compró) ---
-  await tx.table('materiaPrima').toCollection().modify((m: InventarioMPrima) => {
-    m.Precio = ultimoPrecio.get(m.IDItem as number) ?? 0;
-  });
-}
 
 export const db = new CalzadoDB();
