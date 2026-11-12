@@ -17,7 +17,8 @@ import {
   actualizarProductoDB, eliminarProductoDB
 } from '../servicios.js';
 import {
-  el, esc, notificar, mensajeDeError, formatearDinero, obtenerOCrearVista, pedirCampos
+  el, esc, notificar, mensajeDeError, formatearDinero, formatearFechaHora,
+  obtenerOCrearVista, pedirCampos, confirmarAccion
 } from '../herramientas.js';
 
 let alCambiar: () => Promise<void> = async () => {};
@@ -48,7 +49,15 @@ export function montarAdminView(alCambiarDatos: () => Promise<void>): void {
     ${tarjeta('Usuarios', 'usuario', 'adm-usuarios', ['Usuario', 'Nombre', 'Rol', 'Estado'], true)}
     ${tarjeta('Proveedores', 'proveedor', 'adm-proveedores', ['Nombre', 'Teléfono', 'Dirección', 'Correo'], true)}
     ${tarjeta('Materiales y precios', 'material', 'adm-materiales', ['Material', 'Categoría', 'Precio', 'Existencia'], true)}
-    ${tarjeta('Modelos de calzado', 'modelo', 'adm-modelos', ['Modelo', 'Precio base'], false)}
+    ${tarjeta('Modelos de calzado', 'modelo', 'adm-modelos', ['Modelo', 'Precio base', 'Costo por par', 'Utilidad por par'], false)}
+    <section class="x-card">
+      <div class="x-card-cab"><h3>Historial de costos por modelo</h3></div>
+      <div class="x-tabla"><table>
+        <thead><tr><th>Modelo</th><th class="right">Costo por par</th><th>Vigente desde</th></tr></thead>
+        <tbody id="adm-costos"></tbody>
+      </table></div>
+      <p class="x-nota">Cada cambio de costo queda registrado. Las ventas pasadas conservan el costo que tenían al momento de venderse.</p>
+    </section>
     <p class="x-nota">Para dar de alta un modelo nuevo usa Inventario → Calzado. Las ventas se corrigen desde Ventas.</p>`;
 
   vista.addEventListener('click', e => {
@@ -59,20 +68,61 @@ export function montarAdminView(alCambiarDatos: () => Promise<void>): void {
 
 async function manejar(b: HTMLButtonElement): Promise<void> {
   const { ent, accion } = b.dataset;
-  const id = Number(b.dataset.id);
+  const id = b.dataset.id ?? '';
+  if (accion !== 'nuevo' && !id) return;
   try {
     switch (`${ent}:${accion}`) {
       case 'usuario:nuevo': await nuevoUsuario(); break;
       case 'usuario:password': await nuevaPassword(id); break;
-      case 'usuario:estado': await cambiarEstadoUsuario(id, b.dataset.activo === '1'); notificar('Usuario actualizado.'); break;
+      case 'usuario:estado': {
+        const activar = b.dataset.activo === '1';
+        const ok = await confirmarAccion({
+          titulo: activar ? 'Activar usuario' : 'Desactivar usuario',
+          mensaje: `¿Estás seguro de ${activar ? 'activar' : 'desactivar'} este usuario?`,
+          detalle: activar ? 'Podrá volver a iniciar sesión.' : 'Se cerrarán sus sesiones abiertas.',
+          textoOk: activar ? 'Sí, activar' : 'Sí, desactivar',
+          peligro: !activar
+        });
+        if (!ok) return;
+        await cambiarEstadoUsuario(id, activar);
+        notificar('Usuario actualizado.');
+        break;
+      }
       case 'proveedor:nuevo': await formProveedor(); break;
       case 'proveedor:editar': await formProveedor(id); break;
-      case 'proveedor:borrar': if (confirm('¿Eliminar este proveedor?')) { await eliminarProveedorDB(id); notificar('Proveedor eliminado.'); } break;
+      case 'proveedor:borrar': {
+        const ok = await confirmarAccion({
+          titulo: 'Eliminar proveedor', mensaje: '¿Estás seguro de eliminar este proveedor?',
+          detalle: 'Solo se puede eliminar si no tiene compras registradas.',
+          textoOk: 'Sí, eliminar', peligro: true
+        });
+        if (!ok) return;
+        await eliminarProveedorDB(id); notificar('Proveedor eliminado.');
+        break;
+      }
       case 'material:nuevo': await formMaterial(); break;
       case 'material:editar': await formMaterial(id); break;
-      case 'material:borrar': if (confirm('¿Eliminar este material?')) { await eliminarMaterialDB(id); notificar('Material eliminado.'); } break;
+      case 'material:borrar': {
+        const ok = await confirmarAccion({
+          titulo: 'Eliminar material', mensaje: '¿Estás seguro de eliminar este material?',
+          detalle: 'Solo se puede eliminar si no tiene compras registradas.',
+          textoOk: 'Sí, eliminar', peligro: true
+        });
+        if (!ok) return;
+        await eliminarMaterialDB(id); notificar('Material eliminado.');
+        break;
+      }
       case 'modelo:editar': await formModelo(id); break;
-      case 'modelo:borrar': if (confirm('¿Eliminar este modelo y todas sus tallas?')) { await eliminarProductoDB(id); notificar('Modelo eliminado.'); } break;
+      case 'modelo:borrar': {
+        const ok = await confirmarAccion({
+          titulo: 'Eliminar modelo', mensaje: '¿Estás seguro de eliminar este modelo y todas sus tallas?',
+          detalle: 'Solo se puede eliminar si no tiene ventas registradas.',
+          textoOk: 'Sí, eliminar', peligro: true
+        });
+        if (!ok) return;
+        await eliminarProductoDB(id); notificar('Modelo eliminado.');
+        break;
+      }
       default: return;
     }
     await renderAdminView();
@@ -93,23 +143,37 @@ async function nuevoUsuario(): Promise<void> {
       opciones: [{ valor: 'normal', texto: 'Usuario normal' }, { valor: 'admin', texto: 'Administrador' }] }
   ], 'Crear usuario');
   if (!r) return;
+  const rol = r.rol === 'admin' ? 'admin' : 'normal';
+  const ok = await confirmarAccion({
+    titulo: 'Confirmar nuevo usuario',
+    mensaje: '¿Estás seguro de crear este usuario?',
+    detalle: `Usuario: ${r.usuario}\nNombre: ${r.nombre}\nRol: ${rol === 'admin' ? 'Administrador' : 'Usuario normal'}`,
+    textoOk: 'Sí, crear usuario'
+  });
+  if (!ok) return;
   await crearUsuario({
-    usuario: r.usuario ?? '', nombre: r.nombre ?? '', password: r.password ?? '',
-    rol: r.rol === 'admin' ? 'admin' : 'normal'
+    usuario: r.usuario ?? '', nombre: r.nombre ?? '', password: r.password ?? '', rol
   });
   notificar('Usuario creado.');
 }
 
-async function nuevaPassword(id: number): Promise<void> {
+async function nuevaPassword(id: string): Promise<void> {
   const r = await pedirCampos('Cambiar contraseña', [
     { nombre: 'password', etiqueta: 'Nueva contraseña (mínimo 8 caracteres)', tipo: 'password', maxLength: 128 }
   ]);
   if (!r) return;
+  const ok = await confirmarAccion({
+    titulo: 'Confirmar cambio de contraseña',
+    mensaje: '¿Estás seguro de cambiar la contraseña? Se cerrarán las sesiones de ese usuario.',
+    textoOk: 'Sí, cambiar contraseña',
+    peligro: true
+  });
+  if (!ok) return;
   await cambiarPassword(id, r.password ?? '');
   notificar('Contraseña actualizada.');
 }
 
-async function formProveedor(id?: number): Promise<void> {
+async function formProveedor(id?: string): Promise<void> {
   const p = id ? await db.proveedores.get(id) : undefined;
   const r = await pedirCampos(id ? 'Corregir proveedor' : 'Nuevo proveedor', [
     { nombre: 'Nombre', etiqueta: 'Nombre', valor: p?.Nombre ?? '', maxLength: 80 },
@@ -119,11 +183,18 @@ async function formProveedor(id?: number): Promise<void> {
   ]);
   if (!r) return;
   const datos = { Nombre: r.Nombre ?? '', Telefono: r.Telefono ?? '', Direccion: r.Direccion ?? '', Correo: r.Correo ?? '' };
+  const ok = await confirmarAccion({
+    titulo: id ? 'Confirmar corrección de proveedor' : 'Confirmar nuevo proveedor',
+    mensaje: '¿Estás seguro de guardar este proveedor?',
+    detalle: `Nombre: ${datos.Nombre}\nTeléfono: ${datos.Telefono || '(sin teléfono)'}\nDirección: ${datos.Direccion || '(sin dirección)'}\nCorreo: ${datos.Correo || '(sin correo)'}`,
+    textoOk: 'Sí, guardar proveedor'
+  });
+  if (!ok) return;
   if (id) await actualizarProveedorDB(id, datos); else await crearProveedorDB(datos);
   notificar('Proveedor guardado.');
 }
 
-async function formMaterial(id?: number): Promise<void> {
+async function formMaterial(id?: string): Promise<void> {
   const m = id ? await db.materiaPrima.get(id) : undefined;
   const r = await pedirCampos(id ? 'Corregir material' : 'Nuevo material', [
     { nombre: 'Nombre', etiqueta: 'Nombre', valor: m?.Nombre ?? '', maxLength: 80 },
@@ -133,32 +204,53 @@ async function formMaterial(id?: number): Promise<void> {
   ]);
   if (!r) return;
   const datos = { Nombre: r.Nombre ?? '', Categoria: r.Categoria ?? '', Precio: Number(r.Precio), Stock: Number(r.Stock) };
+  const ok = await confirmarAccion({
+    titulo: id ? 'Confirmar corrección de material' : 'Confirmar nuevo material',
+    mensaje: '¿Estás seguro de guardar este material?',
+    detalle: `Material: ${datos.Nombre}\nCategoría: ${datos.Categoria || '(sin categoría)'}\nPrecio: ${formatearDinero(datos.Precio)}\nExistencia: ${datos.Stock}`,
+    textoOk: 'Sí, guardar material'
+  });
+  if (!ok) return;
   if (id) await actualizarMaterialDB(id, datos); else await crearMaterialDB(datos);
   notificar('Material guardado.');
 }
 
-async function formModelo(id: number): Promise<void> {
+async function formModelo(id: string): Promise<void> {
   const p = await db.productos.get(id);
   if (!p) throw new Error('El modelo no existe.');
   const r = await pedirCampos('Corregir modelo', [
     { nombre: 'Modelo', etiqueta: 'Modelo', valor: p.Modelo, maxLength: 40 },
-    { nombre: 'PrecioBase', etiqueta: 'Precio base', tipo: 'number', valor: p.PrecioBase, min: 0, step: '0.01' }
+    { nombre: 'PrecioBase', etiqueta: 'Precio base', tipo: 'number', valor: p.PrecioBase, min: 0, step: '0.01' },
+    { nombre: 'CostoBase', etiqueta: 'Costo por par', tipo: 'number', valor: p.CostoBase ?? 0, min: 0, step: '0.01' }
   ]);
   if (!r) return;
-  await actualizarProductoDB(id, { Modelo: r.Modelo ?? '', PrecioBase: Number(r.PrecioBase) });
+  const precio = Number(r.PrecioBase);
+  const costo = Number(r.CostoBase);
+  const ok = await confirmarAccion({
+    titulo: 'Confirmar corrección de modelo',
+    mensaje: '¿Estás seguro de guardar estos cambios? El nuevo costo aplicará a las ventas futuras.',
+    detalle: `Modelo: ${p.Modelo} → ${r.Modelo}\nPrecio base: ${formatearDinero(p.PrecioBase)} → ${formatearDinero(precio)}\nCosto por par: ${formatearDinero(p.CostoBase ?? 0)} → ${formatearDinero(costo)}\nUtilidad por par: ${formatearDinero(precio - costo)}`,
+    textoOk: 'Sí, guardar modelo'
+  });
+  if (!ok) return;
+  await actualizarProductoDB(id, { Modelo: r.Modelo ?? '', PrecioBase: precio, CostoBase: costo });
   notificar('Modelo actualizado.');
 }
 
 // ---------------------------------------------------------------- render
 
 const vacio = (cols: number): string => `<tr><td colspan="${cols}" class="empty">Sin registros.</td></tr>`;
-const boton = (ent: string, accion: string, id: number | undefined, texto: string, extra = '', peligro = false): string =>
-  `<button class="x-btn-mini${peligro ? ' x-peligro' : ''}" data-ent="${ent}" data-accion="${accion}" data-id="${id}" ${extra}>${texto}</button>`;
+const boton = (ent: string, accion: string, id: string | undefined, texto: string, extra = '', peligro = false): string =>
+  `<button class="x-btn-mini${peligro ? ' x-peligro' : ''}" data-ent="${ent}" data-accion="${accion}" data-id="${id ?? ''}" ${extra}>${texto}</button>`;
 
 export async function renderAdminView(): Promise<void> {
   if (!esAdmin() || !el('adm-usuarios')) return;
-  const [usuarios, proveedores, materiales, modelos] = await Promise.all([
-    listarUsuarios(), db.proveedores.toArray(), db.materiaPrima.toArray(), db.productos.toArray()
+  const [usuarios, proveedores, materiales, modelos, costos] = await Promise.all([
+    listarUsuarios(),
+    db.proveedores.filter(p => !p.deleted_at).toArray(),
+    db.materiaPrima.filter(m => !m.deleted_at).toArray(),
+    db.productos.filter(p => !p.deleted_at).toArray(),
+    db.productoCostos.toArray()
   ]);
 
   el('adm-usuarios')!.innerHTML = usuarios.length === 0 ? vacio(5) : usuarios.map(u => `<tr>
@@ -176,7 +268,24 @@ export async function renderAdminView(): Promise<void> {
     <td class="right">${m.Precio > 0 ? formatearDinero(m.Precio) : '<span class="badge badge-alerta">Sin precio</span>'}</td><td class="right">${m.Stock}</td>
     <td class="x-acciones-fila">${boton('material', 'editar', m.IDItem, 'Corregir')}${boton('material', 'borrar', m.IDItem, 'Eliminar', '', true)}</td></tr>`).join('');
 
-  el('adm-modelos')!.innerHTML = modelos.length === 0 ? vacio(3) : modelos.map(p => `<tr>
-    <td>${esc(p.Modelo)}</td><td class="right">${formatearDinero(p.PrecioBase)}</td>
-    <td class="x-acciones-fila">${boton('modelo', 'editar', p.IDModelo, 'Corregir')}${boton('modelo', 'borrar', p.IDModelo, 'Eliminar', '', true)}</td></tr>`).join('');
+  el('adm-modelos')!.innerHTML = modelos.length === 0 ? vacio(5) : modelos.map(p => {
+    const costo = p.CostoBase ?? 0;
+    return `<tr>
+      <td>${esc(p.Modelo)}</td><td class="right">${formatearDinero(p.PrecioBase)}</td>
+      <td class="right">${costo > 0 ? formatearDinero(costo) : '<span class="badge badge-alerta">Sin costo</span>'}</td>
+      <td class="right">${formatearDinero(p.PrecioBase - costo)}</td>
+      <td class="x-acciones-fila">${boton('modelo', 'editar', p.IDModelo, 'Corregir')}${boton('modelo', 'borrar', p.IDModelo, 'Eliminar', '', true)}</td></tr>`;
+  }).join('');
+
+  const nombresModelo = new Map(modelos.map(p => [p.IDModelo as string, p.Modelo]));
+  const historial = [...costos]
+    .sort((a, b) => new Date(b.VigenteDesde).getTime() - new Date(a.VigenteDesde).getTime())
+    .slice(0, 100);
+  el('adm-costos')!.innerHTML = historial.length === 0
+    ? vacio(3)
+    : historial.map(c => `<tr>
+        <td>${esc(nombresModelo.get(c.IDModelo) ?? `Modelo #${c.IDModelo}`)}</td>
+        <td class="right">${formatearDinero(c.Costo)}</td>
+        <td>${formatearFechaHora(c.VigenteDesde)}</td>
+      </tr>`).join('');
 }

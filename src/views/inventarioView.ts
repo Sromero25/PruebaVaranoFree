@@ -11,7 +11,8 @@ import { db } from '../db.js';
 import { agregarInventarioCalzadoDB, ajustarStockTallaDB, eliminarTallaDB } from '../servicios.js';
 import { esAdmin } from '../auth.js';
 import {
-  el, esc, notificar, mensajeDeError, formatearDinero, obtenerOCrearVista, pedirCampos, UMBRAL_STOCK_BAJO
+  el, esc, notificar, mensajeDeError, formatearDinero, obtenerOCrearVista, pedirCampos,
+  confirmarAccion, UMBRAL_STOCK_BAJO
 } from '../herramientas.js';
 
 let alCambiar: () => Promise<void> = async () => {};
@@ -29,12 +30,13 @@ export function montarInventarioView(alCambiarDatos: () => Promise<void>): void 
     </div>
 
     <div id="inv-calzado">
-      <section class="x-card">
+      ${admin ? `<section class="x-card">
         <h3>Agregar calzado al inventario</h3>
         <form id="form-calzado" class="x-form" autocomplete="off">
           <div class="x-fila">
             <label class="x-campo">Modelo<input id="i-modelo" list="i-modelos" required maxlength="40"></label>
             <label class="x-campo">Precio base (solo modelo nuevo)<input id="i-precio" type="number" min="0" step="0.01"></label>
+            <label class="x-campo">Costo por par (modelo nuevo)<input id="i-costo" type="number" min="0" step="0.01"></label>
           </div>
           <datalist id="i-modelos"></datalist>
           <div class="x-fila">
@@ -42,10 +44,13 @@ export function montarInventarioView(alCambiarDatos: () => Promise<void>): void 
             <label class="x-campo">Talla hasta<input id="i-hasta" type="number" min="1" step="1" required></label>
             <label class="x-campo">Pares por talla<input id="i-cantidad" type="number" min="1" step="1" required></label>
           </div>
-          <p class="x-nota">Para una sola talla, pon el mismo número en "desde" y "hasta". Si la talla ya existe, se suman los pares.</p>
+          <p class="x-nota">Para una sola talla, pon el mismo número en "desde" y "hasta". Si la talla ya existe, se suman los pares. El costo por par es lo que cuesta producir o comprar cada par y se usa para calcular la utilidad real.</p>
           <button type="submit" class="x-btn">Agregar al inventario</button>
         </form>
-      </section>
+      </section>` : `<section class="x-card">
+        <h3>Inventario de calzado</h3>
+        <p class="x-nota">Consulta las existencias. Solo el administrador puede agregar, corregir o eliminar registros de inventario.</p>
+      </section>`}
       <section class="x-card">
         <h3>Existencias de calzado</h3>
         <div class="x-tabla"><table>
@@ -75,26 +80,36 @@ export function montarInventarioView(alCambiarDatos: () => Promise<void>): void 
     })
   );
 
-  el<HTMLFormElement>('form-calzado')!.addEventListener('submit', e => { e.preventDefault(); void guardarCalzado(); });
+  el<HTMLFormElement>('form-calzado')?.addEventListener('submit', e => { e.preventDefault(); void guardarCalzado(); });
 
   el('lista-tallas')!.addEventListener('click', e => {
     const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-accion]');
     if (!b || !esAdmin()) return;
-    const id = Number(b.dataset.id);
+    const id = String(b.dataset.id);
     void (b.dataset.accion === 'stock' ? corregirStock(id, b.dataset.nombre ?? '', Number(b.dataset.stock)) : borrarTalla(id));
   });
 }
 
 async function guardarCalzado(): Promise<void> {
   const precio = el<HTMLInputElement>('i-precio')!.value;
+  const costo = el<HTMLInputElement>('i-costo')!.value;
+  const datos = {
+    modelo: el<HTMLInputElement>('i-modelo')!.value,
+    precioBase: precio === '' ? undefined : Number(precio),
+    costoBase: costo === '' ? undefined : Number(costo),
+    tallaDesde: Number(el<HTMLInputElement>('i-desde')!.value),
+    tallaHasta: Number(el<HTMLInputElement>('i-hasta')!.value),
+    cantidad: Number(el<HTMLInputElement>('i-cantidad')!.value)
+  };
+  const ok = await confirmarAccion({
+    titulo: 'Confirmar alta de inventario',
+    mensaje: '¿Estás seguro de agregar este calzado al inventario?',
+    detalle: `Modelo: ${datos.modelo}\nTallas: ${datos.tallaDesde} a ${datos.tallaHasta}\nPares por talla: ${datos.cantidad}\nPrecio base: ${datos.precioBase ?? '(sin cambio)'}\nCosto por par: ${datos.costoBase ?? '(sin cambio)'}`,
+    textoOk: 'Sí, agregar'
+  });
+  if (!ok) return;
   try {
-    const r = await agregarInventarioCalzadoDB({
-      modelo: el<HTMLInputElement>('i-modelo')!.value,
-      precioBase: precio === '' ? undefined : Number(precio),
-      tallaDesde: Number(el<HTMLInputElement>('i-desde')!.value),
-      tallaHasta: Number(el<HTMLInputElement>('i-hasta')!.value),
-      cantidad: Number(el<HTMLInputElement>('i-cantidad')!.value)
-    });
+    const r = await agregarInventarioCalzadoDB(datos);
     notificar(`${r.modeloNuevo ? 'Modelo nuevo' : 'Modelo'} ${r.modelo}: ${r.tallasNuevas} tallas nuevas, ${r.tallasActualizadas} actualizadas.`);
     el<HTMLFormElement>('form-calzado')!.reset();
     await alCambiar();
@@ -103,13 +118,21 @@ async function guardarCalzado(): Promise<void> {
   }
 }
 
-async function corregirStock(idTalla: number, nombre: string, actual: number): Promise<void> {
+async function corregirStock(idTalla: string, nombre: string, actual: number): Promise<void> {
   const r = await pedirCampos('Corregir existencia', [
     { nombre: 'stock', etiqueta: `${nombre} — existencia real`, tipo: 'number', valor: actual, min: 0, step: '1' }
   ]);
   if (!r) return;
+  const nuevo = Number(r.stock);
+  const ok = await confirmarAccion({
+    titulo: 'Confirmar corrección de existencia',
+    mensaje: '¿Estás seguro de cambiar la existencia?',
+    detalle: `${nombre}\nExistencia actual: ${actual}\nExistencia nueva: ${nuevo}`,
+    textoOk: 'Sí, corregir'
+  });
+  if (!ok) return;
   try {
-    await ajustarStockTallaDB(idTalla, Number(r.stock));
+    await ajustarStockTallaDB(idTalla, nuevo);
     notificar('Existencia corregida.');
     await alCambiar();
   } catch (err) {
@@ -117,8 +140,15 @@ async function corregirStock(idTalla: number, nombre: string, actual: number): P
   }
 }
 
-async function borrarTalla(idTalla: number): Promise<void> {
-  if (!confirm('¿Eliminar esta talla del inventario?')) return;
+async function borrarTalla(idTalla: string): Promise<void> {
+  const ok = await confirmarAccion({
+    titulo: 'Eliminar talla',
+    mensaje: '¿Estás seguro de eliminar esta talla del inventario?',
+    detalle: 'Solo se puede eliminar si la talla no tiene ventas registradas.',
+    textoOk: 'Sí, eliminar',
+    peligro: true
+  });
+  if (!ok) return;
   try {
     await eliminarTallaDB(idTalla);
     notificar('Talla eliminada.');
@@ -130,10 +160,12 @@ async function borrarTalla(idTalla: number): Promise<void> {
 
 export async function renderInventarioView(): Promise<void> {
   const [tallas, productos, insumos] = await Promise.all([
-    db.tallas.toArray(), db.productos.toArray(), db.materiaPrima.toArray()
+    db.tallas.filter(t => !t.deleted_at).toArray(),
+    db.productos.filter(p => !p.deleted_at).toArray(),
+    db.materiaPrima.filter(m => !m.deleted_at).toArray()
   ]);
   const admin = esAdmin();
-  const nombres = new Map(productos.map(p => [p.IDModelo as number, p.Modelo]));
+  const nombres = new Map(productos.map(p => [p.IDModelo as string, p.Modelo]));
 
   const lista = el('i-modelos');
   if (lista) lista.innerHTML = productos.map(p => `<option value="${esc(p.Modelo)}"></option>`).join('');
@@ -148,7 +180,8 @@ export async function renderInventarioView(): Promise<void> {
       tabla.innerHTML = orden.map(t => {
         const nombre = nombres.get(t.IDModelo) ?? `Modelo #${t.IDModelo}`;
         let badge = '<span class="badge">Disponible</span>';
-        if (t.Stock === 0) badge = '<span class="badge badge-peligro">Agotado</span>';
+        if (t.Stock < 0) badge = '<span class="badge badge-peligro">Stock negativo</span>';
+        else if (t.Stock === 0) badge = '<span class="badge badge-peligro">Agotado</span>';
         else if (t.Stock <= UMBRAL_STOCK_BAJO) badge = '<span class="badge badge-alerta">Bajo stock</span>';
         const acciones = admin
           ? `<td class="x-acciones-fila"><button class="x-btn-mini" data-accion="stock" data-id="${t.IDTalla}" data-stock="${t.Stock}" data-nombre="${esc(`${nombre} talla ${t.Talla}`)}">Corregir</button>

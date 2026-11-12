@@ -14,10 +14,11 @@ import { registrarCompraDB, anularCompraDB } from '../servicios.js';
 import { obtenerComprasVista } from '../consultas.js';
 import { esAdmin } from '../auth.js';
 import {
-  el, esc, notificar, mensajeDeError, formatearDinero, formatearFecha, obtenerOCrearVista
+  el, esc, notificar, mensajeDeError, formatearDinero, formatearFecha,
+  obtenerOCrearVista, confirmarAccion
 } from '../herramientas.js';
 
-let carrito: { IDItem: number; Cantidad: number }[] = [];
+let carrito: { IDItem: string; Cantidad: number }[] = [];
 let materiales: InventarioMPrima[] = [];
 let alCambiar: () => Promise<void> = async () => {};
 
@@ -58,13 +59,16 @@ export function montarComprasView(alCambiarDatos: () => Promise<void>): void {
   el<HTMLFormElement>('form-compra')!.addEventListener('submit', e => { e.preventDefault(); void guardar(); });
   el('tabla-compras')!.addEventListener('click', e => {
     const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-anular]');
-    if (b && esAdmin()) void anular(Number(b.dataset.anular));
+    if (b && esAdmin() && b.dataset.anular) void anular(b.dataset.anular);
   });
   pintarCarrito();
 }
 
 export async function actualizarSelectoresCompras(): Promise<void> {
-  const [proveedores, mats] = await Promise.all([db.proveedores.toArray(), db.materiaPrima.toArray()]);
+  const [proveedores, mats] = await Promise.all([
+    db.proveedores.filter(p => !p.deleted_at).toArray(),
+    db.materiaPrima.filter(m => !m.deleted_at).toArray()
+  ]);
   materiales = mats;
 
   const selProv = el<HTMLSelectElement>('c-proveedor');
@@ -81,7 +85,8 @@ export async function actualizarSelectoresCompras(): Promise<void> {
 }
 
 function agregar(): void {
-  const idItem = Number(el<HTMLSelectElement>('c-item')!.value);
+  const idItem = el<HTMLSelectElement>('c-item')!.value;
+  if (!idItem) return notificar('Elige un material.', true);
   const cantidad = Number(el<HTMLInputElement>('c-cantidad')!.value);
   const m = materiales.find(x => x.IDItem === idItem);
   if (!m) return notificar('Elige un material.', true);
@@ -120,8 +125,26 @@ function pintarCarrito(): void {
 }
 
 async function guardar(): Promise<void> {
-  const idProveedor = Number(el<HTMLSelectElement>('c-proveedor')!.value);
+  const idProveedor = el<HTMLSelectElement>('c-proveedor')!.value;
   if (!idProveedor) return notificar('Elige un proveedor.', true);
+  if (carrito.length === 0) return notificar('Agrega al menos un material a la compra.', true);
+
+  const total = carrito.reduce((acc, l) => {
+    const m = materiales.find(x => x.IDItem === l.IDItem);
+    return acc + l.Cantidad * (m?.Precio ?? 0);
+  }, 0);
+  const detalle = carrito.map(l => {
+    const m = materiales.find(x => x.IDItem === l.IDItem);
+    return `${m?.Nombre ?? 'Material'} × ${l.Cantidad} = ${formatearDinero(l.Cantidad * (m?.Precio ?? 0))}`;
+  }).join('\n');
+  const ok = await confirmarAccion({
+    titulo: 'Confirmar compra',
+    mensaje: '¿Estás seguro de registrar esta compra? Se sumará al inventario de materia prima.',
+    detalle: `${detalle}\n\nTotal: ${formatearDinero(total)}`,
+    textoOk: 'Sí, registrar compra'
+  });
+  if (!ok) return;
+
   try {
     await registrarCompraDB(idProveedor, carrito);
     notificar('Compra registrada y stock de material sumado');
@@ -152,8 +175,15 @@ export async function renderComprasView(): Promise<void> {
   </tr>`).join('');
 }
 
-async function anular(idCompra: number): Promise<void> {
-  if (!confirm('¿Anular esta compra? Se descontará el material que había sumado.')) return;
+async function anular(idCompra: string): Promise<void> {
+  const ok = await confirmarAccion({
+    titulo: 'Anular compra',
+    mensaje: '¿Estás seguro de anular esta compra? Se descontará el material que había sumado.',
+    detalle: `Compra: ${idCompra}`,
+    textoOk: 'Sí, anular compra',
+    peligro: true
+  });
+  if (!ok) return;
   try {
     await anularCompraDB(idCompra);
     notificar('Compra anulada.');

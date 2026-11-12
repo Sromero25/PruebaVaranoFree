@@ -1,38 +1,29 @@
 /**
  * auth.ts
  * ----------------------------------------------------------------------------
- * Usuarios, inicio de sesión, sesión persistente y control de permisos.
+ * Autenticación central contra el backend.
  *
- * Roles:
- *  - admin : todo, incluidas las correcciones y el panel de administración.
- *  - normal: registrar ventas/compras/clientes y dar de alta calzado.
- *
- * Sesión persistente: al iniciar con "mantener sesión" se guarda un token
- * aleatorio en localStorage (30 días); si no, en sessionStorage (hasta cerrar la
- * pestaña). La BD sólo guarda el hash del token.
- *
- * IMPORTANTE: la app corre 100 % en el navegador, así que estos controles
- * protegen el uso normal, no a alguien con acceso a las herramientas de
- * desarrollador del equipo. Para seguridad real hace falta un servidor.
+ * - El primer login y la creación del administrador requieren internet.
+ * - Después, el token y el usuario se cachean para poder abrir la app sin
+ *   conexión y seguir trabajando; el servidor vuelve a validar el token en
+ *   cada sincronización.
+ * - Crear usuarios y cambiar contraseñas se hace en línea.
  */
 
 import { db, type Rol, type Usuario } from './db.js';
-import { hashPassword, generarAleatorioHex, sha256Hex, compararSeguro } from './seguridad.js';
+import { api, ApiError, type UsuarioApi } from './api.js';
 
 export interface UsuarioPublico {
-  IDUsuario: number;
+  IDUsuario: string;
   Usuario: string;
   Nombre: string;
   Rol: Rol;
 }
 
 const CLAVE_TOKEN = 'varano.token';
-const CLAVE_INTENTOS = 'varano.intentos';
+const CLAVE_USUARIO = 'varano.usuario';
+const CLAVE_EXPIRA = 'varano.sesion.expira';
 const DIAS_SESION = 30;
-const MAX_INTENTOS = 5;
-const BLOQUEO_MS = 60_000;
-/** Sal de relleno para gastar el mismo tiempo cuando el usuario no existe. */
-const SAL_FALSA = '00112233445566778899aabbccddeeff';
 
 let actual: UsuarioPublico | null = null;
 
@@ -49,57 +40,117 @@ export function requerirAdmin(): void {
   if (actual?.Rol !== 'admin') throw new Error('Esta acción es solo para administradores.');
 }
 
-// ---------------------------------------------------------------- utilidades
+// ---------------------------------------------------------------- storage
 
-const publico = (u: Usuario): UsuarioPublico => ({
-  IDUsuario: u.IDUsuario as number,
+const almacen = (recordar: boolean): Storage => recordar ? localStorage : sessionStorage;
+
+function leerDeAmbos(clave: string): string | null {
+  try { return localStorage.getItem(clave) ?? sessionStorage.getItem(clave); } catch { return null; }
+}
+
+function limpiarSesionLocal(): void {
+  try {
+    for (const clave of [CLAVE_TOKEN, CLAVE_USUARIO, CLAVE_EXPIRA]) {
+      localStorage.removeItem(clave);
+      sessionStorage.removeItem(clave);
+    }
+  } catch { /* almacenamiento no disponible */ }
+}
+
+function guardarSesionLocal(token: string, usuario: UsuarioPublico, recordar: boolean): void {
+  const store = almacen(recordar);
+  const expira = Date.now() + DIAS_SESION * 24 * 60 * 60 * 1000;
+  try {
+    limpiarSesionLocal();
+    store.setItem(CLAVE_TOKEN, token);
+    store.setItem(CLAVE_USUARIO, JSON.stringify(usuario));
+    store.setItem(CLAVE_EXPIRA, String(expira));
+  } catch { /* almacenamiento no disponible */ }
+}
+
+function leerSesionLocal(): { token: string; usuario: UsuarioPublico; expira: number } | null {
+  const token = leerDeAmbos(CLAVE_TOKEN);
+  const crudo = leerDeAmbos(CLAVE_USUARIO);
+  const expira = Number(leerDeAmbos(CLAVE_EXPIRA) ?? 0);
+  if (!token || !crudo || !Number.isFinite(expira)) return null;
+  if (expira <= Date.now()) {
+    limpiarSesionLocal();
+    return null;
+  }
+  try {
+    const usuario = JSON.parse(crudo) as UsuarioPublico;
+    if (!usuario?.IDUsuario || !usuario?.Rol) return null;
+    return { token, usuario, expira };
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------- cache local
+
+const publico = (u: UsuarioPublico): UsuarioPublico => ({
+  IDUsuario: u.IDUsuario,
   Usuario: u.Usuario,
   Nombre: u.Nombre,
   Rol: u.Rol
 });
+
+const desdeApi = (u: UsuarioApi): UsuarioPublico => publico({
+  IDUsuario: u.id,
+  Usuario: u.usuario,
+  Nombre: u.nombre,
+  Rol: u.rol
+});
+
+async function cachearUsuario(u: UsuarioPublico, activo = true): Promise<void> {
+  const registro: Usuario = {
+    IDUsuario: u.IDUsuario,
+    Usuario: u.Usuario,
+    Nombre: u.Nombre,
+    Rol: u.Rol,
+    Activo: activo ? 1 : 0,
+    updated_at: new Date().toISOString()
+  };
+  await db.usuarios.put(registro);
+}
+
+// ---------------------------------------------------------------- usuarios
+
+/** Situación del sistema al abrir la app. */
+export type EstadoSistema = 'inicializado' | 'sin_usuarios' | 'sin_conexion';
+
+/**
+ * Consulta al servidor si ya existe al menos un usuario.
+ *
+ * Solo devuelve `sin_usuarios` cuando el servidor lo confirma; si la API no
+ * responde (URL mal configurada, sin internet, backend caído) devuelve
+ * `sin_conexion` para no mostrar por error la pantalla de "crear administrador".
+ */
+export async function estadoSistema(): Promise<EstadoSistema> {
+  try {
+    const estado = await api.estado();
+    return estado.inicializado ? 'inicializado' : 'sin_usuarios';
+  } catch {
+    // Si hay usuarios cacheados se puede iniciar sesión sin conexión.
+    if ((await db.usuarios.count()) > 0) return 'inicializado';
+    return 'sin_conexion';
+  }
+}
+
+export async function hayUsuarios(): Promise<boolean> {
+  return (await estadoSistema()) !== 'sin_usuarios';
+}
 
 function validarPassword(password: string): void {
   if (password.length < 8) throw new Error('La contraseña debe tener al menos 8 caracteres.');
   if (password.length > 128) throw new Error('La contraseña es demasiado larga.');
 }
 
-function leerIntentos(): { n: number; bloqueoHasta: number } {
-  try {
-    const crudo = localStorage.getItem(CLAVE_INTENTOS);
-    if (crudo) {
-      const d = JSON.parse(crudo) as { n?: number; bloqueoHasta?: number };
-      return { n: Number(d.n) || 0, bloqueoHasta: Number(d.bloqueoHasta) || 0 };
-    }
-  } catch { /* almacenamiento no disponible */ }
-  return { n: 0, bloqueoHasta: 0 };
-}
-
-function guardarIntentos(n: number, bloqueoHasta: number): void {
-  try { localStorage.setItem(CLAVE_INTENTOS, JSON.stringify({ n, bloqueoHasta })); } catch { /* ignorar */ }
-}
-
-function leerToken(): string | null {
-  try { return localStorage.getItem(CLAVE_TOKEN) ?? sessionStorage.getItem(CLAVE_TOKEN); } catch { return null; }
-}
-
-function borrarToken(): void {
-  try { localStorage.removeItem(CLAVE_TOKEN); sessionStorage.removeItem(CLAVE_TOKEN); } catch { /* ignorar */ }
-}
-
-// ---------------------------------------------------------------- usuarios
-
-export async function hayUsuarios(): Promise<boolean> {
-  return (await db.usuarios.count()) > 0;
-}
-
 /**
- * Crea un usuario. Si todavía no existe ninguno, crea el primer administrador
- * sin requerir sesión; después sólo un administrador puede crear usuarios.
+ * Crea un usuario. Si el sistema está vacío, usa `/auth/bootstrap` (sólo
+ * funciona una vez). Después requiere administrador y conexión.
  */
 export async function crearUsuario(d: { usuario: string; nombre: string; password: string; rol: Rol }): Promise<void> {
-  const total = await db.usuarios.count();
-  if (total > 0) requerirAdmin();
-
   const usuario = d.usuario.trim().toLowerCase();
   if (!/^[a-z0-9._-]{3,30}$/.test(usuario)) {
     throw new Error('El usuario debe tener 3 a 30 caracteres: letras, números, punto, guion o guion bajo.');
@@ -107,108 +158,163 @@ export async function crearUsuario(d: { usuario: string; nombre: string; passwor
   const nombre = d.nombre.trim();
   if (nombre.length < 1 || nombre.length > 60) throw new Error('El nombre es obligatorio (máximo 60 caracteres).');
   validarPassword(d.password);
-  const rol: Rol = total === 0 ? 'admin' : d.rol;
-  if (rol !== 'admin' && rol !== 'normal') throw new Error('Rol no válido.');
 
-  if (await db.usuarios.where('Usuario').equals(usuario).first()) {
-    throw new Error('Ese nombre de usuario ya existe.');
+  const estado = await estadoSistema();
+  try {
+    if (estado === 'sin_usuarios') {
+      const r = await api.bootstrap({ usuario, nombre, password: d.password });
+      await cachearUsuario(desdeApi(r.usuario));
+    } else if (estado === 'sin_conexion' && !actual) {
+      throw new Error('Necesitas conexión a internet para crear la primera cuenta.');
+    } else {
+      requerirAdmin();
+      const r = await api.crearUsuario({ usuario, nombre, password: d.password, rol: d.rol });
+      await cachearUsuario(desdeApi(r.usuario));
+    }
+  } catch (error) {
+    if (error instanceof ApiError && error.estado === 0) {
+      throw new Error('Necesitas conexión a internet para crear usuarios.');
+    }
+    throw error;
   }
+}
 
-  const Sal = generarAleatorioHex(16);
-  const Hash = await hashPassword(d.password, Sal);
-  await db.usuarios.add({ Usuario: usuario, Nombre: nombre, Rol: rol, Sal, Hash, Activo: 1 });
+/**
+ * Registro público controlado. Crea un usuario normal; si se envía un código
+ * de invitación válido, el servidor lo crea como administrador.
+ */
+export async function registrarUsuario(d: {
+  usuario: string;
+  nombre: string;
+  password: string;
+  codigoAdmin?: string;
+  recordar?: boolean;
+}): Promise<void> {
+  const usuario = d.usuario.trim().toLowerCase();
+  if (!/^[a-z0-9._-]{3,30}$/.test(usuario)) {
+    throw new Error('El usuario debe tener 3 a 30 caracteres: letras, números, punto, guion o guion bajo.');
+  }
+  const nombre = d.nombre.trim();
+  if (nombre.length < 1 || nombre.length > 60) throw new Error('El nombre es obligatorio (máximo 60 caracteres).');
+  validarPassword(d.password);
+
+  try {
+    const r = await api.registro({
+      usuario,
+      nombre,
+      password: d.password,
+      codigo_admin: d.codigoAdmin?.trim() || undefined
+    });
+    const u = desdeApi(r.usuario);
+    actual = u;
+    guardarSesionLocal(r.token, u, d.recordar ?? true);
+    await cachearUsuario(u, r.usuario.activo);
+  } catch (error) {
+    if (error instanceof ApiError && error.estado === 0) {
+      throw new Error('Necesitas conexión a internet para crear la cuenta.');
+    }
+    throw error;
+  }
 }
 
 export async function listarUsuarios(): Promise<(UsuarioPublico & { Activo: boolean })[]> {
   requerirAdmin();
-  const lista = await db.usuarios.toArray();
-  return lista.map(u => ({ ...publico(u), Activo: u.Activo === 1 }));
+  try {
+    const r = await api.listarUsuarios();
+    const lista = r.usuarios.map(u => ({ ...desdeApi(u), Activo: u.activo }));
+    await db.transaction('rw', [db.usuarios], async () => {
+      for (const u of r.usuarios) await cachearUsuario(desdeApi(u), u.activo);
+    });
+    return lista;
+  } catch (error) {
+    if (error instanceof ApiError && error.estado === 0) {
+      const cache = await db.usuarios.toArray();
+      return cache.map(u => ({ ...publico(u), Activo: u.Activo === 1 }));
+    }
+    throw error;
+  }
 }
 
-/** Cambia la contraseña (el propio usuario o un administrador) y cierra sus demás sesiones. */
-export async function cambiarPassword(IDUsuario: number, nueva: string): Promise<void> {
+export async function cambiarPassword(IDUsuario: string, nueva: string): Promise<void> {
   requerirSesion();
   if (actual?.IDUsuario !== IDUsuario) requerirAdmin();
   validarPassword(nueva);
-
-  const Sal = generarAleatorioHex(16);
-  const Hash = await hashPassword(nueva, Sal);
-  await db.usuarios.update(IDUsuario, { Sal, Hash });
-
-  const tokenActual = leerToken();
-  const hashActual = tokenActual ? await sha256Hex(tokenActual) : '';
-  await db.sesiones.where('IDUsuario').equals(IDUsuario).filter(s => s.TokenHash !== hashActual).delete();
+  try {
+    await api.cambiarPassword(IDUsuario, nueva);
+  } catch (error) {
+    if (error instanceof ApiError && error.estado === 0) {
+      throw new Error('Necesitas conexión a internet para cambiar contraseñas.');
+    }
+    throw error;
+  }
+  if (actual?.IDUsuario === IDUsuario) {
+    limpiarSesionLocal();
+    actual = null;
+  }
 }
 
-export async function cambiarEstadoUsuario(IDUsuario: number, activo: boolean): Promise<void> {
+export async function cambiarEstadoUsuario(IDUsuario: string, activo: boolean): Promise<void> {
   requerirAdmin();
   if (actual?.IDUsuario === IDUsuario) throw new Error('No puedes desactivar tu propio usuario.');
-  const u = await db.usuarios.get(IDUsuario);
-  if (!u) throw new Error('El usuario no existe.');
-
-  if (!activo && u.Rol === 'admin') {
-    const admins = await db.usuarios.filter(x => x.Rol === 'admin' && x.Activo === 1).count();
-    if (admins <= 1) throw new Error('Debe quedar al menos un administrador activo.');
+  try {
+    await api.cambiarEstadoUsuario(IDUsuario, activo);
+    await db.usuarios.update(IDUsuario, { Activo: activo ? 1 : 0 });
+  } catch (error) {
+    if (error instanceof ApiError && error.estado === 0) {
+      throw new Error('Necesitas conexión a internet para activar o desactivar usuarios.');
+    }
+    throw error;
   }
-  await db.usuarios.update(IDUsuario, { Activo: activo ? 1 : 0 });
-  if (!activo) await db.sesiones.where('IDUsuario').equals(IDUsuario).delete();
 }
 
 // ---------------------------------------------------------------- sesión
 
-async function abrirSesion(u: Usuario, recordar: boolean): Promise<void> {
-  const token = generarAleatorioHex(32);
-  await db.sesiones.add({
-    TokenHash: await sha256Hex(token),
-    IDUsuario: u.IDUsuario as number,
-    Expira: Date.now() + DIAS_SESION * 24 * 60 * 60 * 1000
-  });
-  borrarToken();
-  try { (recordar ? localStorage : sessionStorage).setItem(CLAVE_TOKEN, token); } catch { /* ignorar */ }
-  actual = publico(u);
-}
-
-/** Inicia sesión. Bloquea 60 s tras 5 intentos fallidos seguidos. */
 export async function iniciarSesion(usuario: string, password: string, recordar: boolean): Promise<void> {
-  const { n, bloqueoHasta } = leerIntentos();
-  if (bloqueoHasta > Date.now()) {
-    throw new Error(`Demasiados intentos. Espera ${Math.ceil((bloqueoHasta - Date.now()) / 1000)} segundos.`);
+  const nombre = usuario.trim().toLowerCase();
+  let respuesta;
+  try {
+    respuesta = await api.login(nombre, password);
+  } catch (error) {
+    if (error instanceof ApiError && error.estado === 0) {
+      throw new Error('Necesitas conexión para iniciar sesión. Si ya entraste antes en este equipo, recarga la app y se restaurará tu sesión.');
+    }
+    throw error;
   }
 
-  const u = await db.usuarios.where('Usuario').equals(usuario.trim().toLowerCase()).first();
-  const hash = await hashPassword(password, u?.Sal ?? SAL_FALSA);
-  const ok = !!u && u.Activo === 1 && compararSeguro(hash, u.Hash);
-
-  if (!ok || !u) {
-    const nuevo = n + 1;
-    guardarIntentos(nuevo >= MAX_INTENTOS ? 0 : nuevo, nuevo >= MAX_INTENTOS ? Date.now() + BLOQUEO_MS : 0);
-    throw new Error('Usuario o contraseña incorrectos.');
-  }
-
-  guardarIntentos(0, 0);
-  await abrirSesion(u, recordar);
+  const u = desdeApi(respuesta.usuario);
+  actual = u;
+  guardarSesionLocal(respuesta.token, u, recordar);
+  await cachearUsuario(u, respuesta.usuario.activo);
 }
 
-/** Intenta reanudar una sesión guardada. Devuelve `true` si sigue vigente. */
+/** Reanuda una sesión cacheada. Funciona sin internet. */
 export async function restaurarSesion(): Promise<boolean> {
-  await db.sesiones.where('Expira').below(Date.now()).delete();
+  const sesion = leerSesionLocal();
+  if (!sesion) return false;
 
-  const token = leerToken();
-  if (!token) return false;
+  actual = publico(sesion.usuario);
+  await cachearUsuario(actual);
 
-  const s = await db.sesiones.where('TokenHash').equals(await sha256Hex(token)).first();
-  const u = s ? await db.usuarios.get(s.IDUsuario) : undefined;
-  if (!s || !u || u.Activo !== 1) {
-    borrarToken();
-    return false;
+  // Validación silenciosa: si el servidor dice que el token ya no sirve, se cierra.
+  try {
+    const r = await api.me();
+    const u = desdeApi(r.usuario);
+    actual = u;
+    guardarSesionLocal(sesion.token, u, localStorage.getItem(CLAVE_TOKEN) !== null);
+    await cachearUsuario(u);
+  } catch (error) {
+    if (error instanceof ApiError && error.estado === 401) {
+      limpiarSesionLocal();
+      actual = null;
+      return false;
+    }
+    // Sin conexión: seguimos con la sesión cacheada.
   }
-  actual = publico(u);
   return true;
 }
 
 export async function cerrarSesion(): Promise<void> {
-  const token = leerToken();
-  if (token) await db.sesiones.where('TokenHash').equals(await sha256Hex(token)).delete();
-  borrarToken();
+  try { await api.logout(); } catch { /* sin conexión: se cierra localmente */ }
+  limpiarSesionLocal();
   actual = null;
 }

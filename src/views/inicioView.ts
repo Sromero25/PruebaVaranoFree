@@ -7,7 +7,8 @@
  */
 
 import { db } from '../db.js';
-import { obtenerBalanceDB, obtenerVentasVista } from '../consultas.js';
+import { esAdmin } from '../auth.js';
+import { claveMes, obtenerBalanceDB, obtenerVentasVista } from '../consultas.js';
 import { el, esc, formatearDinero, formatearFecha, UMBRAL_STOCK_BAJO } from '../herramientas.js';
 
 function setTexto(id: string, texto: string): void {
@@ -16,15 +17,36 @@ function setTexto(id: string, texto: string): void {
 }
 
 export async function renderInicioView(): Promise<void> {
+  const mesActual = claveMes(new Date());
   const [tallas, productos, balance, ventas] = await Promise.all([
-    db.tallas.toArray(), db.productos.toArray(), obtenerBalanceDB(), obtenerVentasVista()
+    db.tallas.filter(t => !t.deleted_at).toArray(),
+    db.productos.filter(p => !p.deleted_at).toArray(),
+    obtenerBalanceDB(mesActual),
+    obtenerVentasVista()
   ]);
 
-  // KPIs
+  // Encabezado según el rol: deja claro qué puede hacer cada quien.
+  const modo = el('txt-modo');
+  if (modo) {
+    modo.textContent = esAdmin()
+      ? 'Vista de administrador: ventas, compras, inventario, costos y usuarios.'
+      : 'Vista de usuario: registra ventas y consulta las existencias del taller.';
+  }
+
+  // KPIs del mes en curso
   setTexto('txt-ventas', formatearDinero(balance.totalIngresos));
-  setTexto('txt-compras', formatearDinero(balance.totalGastos));
+  setTexto('txt-costo', formatearDinero(balance.totalCostoVentas));
+  setTexto('txt-compras', formatearDinero(balance.totalCompras));
   setTexto('txt-utilidad', formatearDinero(balance.utilidadNeta));
   setTexto('txt-pares', `${tallas.reduce((acc, t) => acc + t.Stock, 0)} pares`);
+
+  const aviso = el('txt-aviso-costo');
+  if (aviso) {
+    aviso.hidden = balance.paresSinCosto === 0;
+    aviso.textContent = balance.paresSinCosto > 0
+      ? `Hay ${balance.paresSinCosto} pares vendidos sin costo registrado; su utilidad no es confiable. Pide al administrador que capture el costo por par del modelo.`
+      : '';
+  }
 
   // Últimas 5 ventas
   const tabla = el('tabla-ultimas-ventas');
@@ -41,10 +63,10 @@ export async function renderInicioView(): Promise<void> {
   // Alertas de stock
   const cont = el('lista-stock-bajo');
   if (cont) {
-    const nombres = new Map(productos.map(p => [p.IDModelo as number, p.Modelo]));
+    const nombres = new Map(productos.map(p => [p.IDModelo as string, p.Modelo]));
     const alertas = tallas
       .filter(t => t.Stock <= UMBRAL_STOCK_BAJO)
-      .map(t => `${nombres.get(t.IDModelo) ?? `Modelo #${t.IDModelo}`} (Talla ${t.Talla}) - ${t.Stock === 0 ? 'Agotado' : `${t.Stock} pares`}`);
+      .map(t => `${nombres.get(t.IDModelo) ?? `Modelo #${t.IDModelo}`} (Talla ${t.Talla}) - ${t.Stock < 0 ? `STOCK NEGATIVO: ${t.Stock}` : t.Stock === 0 ? 'Agotado' : `${t.Stock} pares`}`);
     cont.innerHTML = alertas.length === 0
       ? '<p class="muted">Sin alertas por ahora.</p>'
       : alertas.map(a => `<div class="resumen-linea"><span>${esc(a)}</span></div>`).join('');

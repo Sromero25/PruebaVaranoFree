@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="src/styles/main.css" />
+  <link rel="icon" href="data:,">
 </head>
 <body>
 <div class="app" id="app">
@@ -36,7 +37,7 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg>
         Ventas
       </button>
-      <button class="nav-link" data-vista="compras">
+      <button class="nav-link" data-vista="compras" data-solo-admin>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M2 3h3l2.7 12.4a2 2 0 0 0 2 1.6h7.7a2 2 0 0 0 2-1.5L21 8H6"/></svg>
         Compras
       </button>
@@ -44,7 +45,7 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>
         Inventario
       </button>
-      <button class="nav-link" data-vista="resumen">
+      <button class="nav-link" data-vista="resumen" data-solo-admin>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h4"/></svg>
         Resumen del mes
       </button>
@@ -58,16 +59,18 @@
     <!-- ---------- INICIO / DASHBOARD ---------- -->
     <section class="vista activa" id="vista-inicio">
       <div class="page-head">
-        <div><h1>Inicio</h1><p>Así va el taller este mes.</p></div>
+        <div><h1>Inicio</h1><p id="txt-modo">Así va el taller este mes.</p></div>
         <button class="btn" data-ir="ventas">+ Nueva venta</button>
       </div>
 
       <div class="grid grid-kpi">
         <div class="card kpi"><div class="label">Ventas del mes</div><div class="value num" id="txt-ventas">$0</div></div>
-        <div class="card kpi"><div class="label">Compras del mes</div><div class="value num" id="txt-compras">$0</div></div>
-        <div class="card kpi destacado"><div class="label">Utilidad neta</div><div class="value num" id="txt-utilidad">$0</div></div>
+        <div class="card kpi" data-solo-admin><div class="label">Costo de lo vendido</div><div class="value num" id="txt-costo">$0</div></div>
+        <div class="card kpi destacado" data-solo-admin><div class="label">Utilidad neta</div><div class="value num" id="txt-utilidad">$0</div></div>
         <div class="card kpi"><div class="label">Pares en bodega</div><div class="value num" id="txt-pares">0</div></div>
+        <div class="card kpi" data-solo-admin><div class="label">Compras del mes (inversión)</div><div class="value num" id="txt-compras">$0</div></div>
       </div>
+      <p class="x-nota mt" id="txt-aviso-costo" data-solo-admin hidden></p>
 
       <div class="grid grid-main mt">
         <div class="card">
@@ -124,7 +127,7 @@
     </section>
 
     <!-- ---------- COMPRAS ---------- -->
-    <section class="vista" id="vista-compras">
+    <section class="vista" id="vista-compras" data-solo-admin>
       <div class="page-head"><div><h1>Compras</h1><p>Materia prima comprada a proveedores.</p></div></div>
       <div class="card">
         <div class="card-head"><h2>Registrar compra</h2></div>
@@ -190,7 +193,7 @@
     </section>
 
     <!-- ---------- RESUMEN DEL MES ---------- -->
-    <section class="vista" id="vista-resumen">
+    <section class="vista" id="vista-resumen" data-solo-admin>
       <div class="page-head">
         <div><h1>Resumen del mes</h1><p>Cierre de ingresos, gastos y utilidad.</p></div>
         <div class="acciones">
@@ -202,9 +205,11 @@
         <div class="card">
           <div class="card-head"><h2>Balance</h2></div>
           <div class="resumen-linea"><span>Ventas (ingresos)</span><span class="num" id="r-ventas">$0</span></div>
-          <div class="resumen-linea"><span>Compras (gastos)</span><span class="num" id="r-compras">$0</span></div>
+          <div class="resumen-linea"><span>Costo de lo vendido</span><span class="num" id="r-costo">$0</span></div>
+          <div class="resumen-linea"><span>Compras del mes (inversión)</span><span class="num" id="r-compras">$0</span></div>
           <div class="resumen-linea"><span>Pares vendidos</span><span class="num" id="r-pares">0</span></div>
           <div class="resumen-linea total"><span>Utilidad neta</span><span class="num pos" id="r-utilidad">$0</span></div>
+          <p class="x-nota" id="r-aviso-costo" hidden></p>
         </div>
         <div class="card">
           <div class="card-head"><h2>Modelos más vendidos</h2></div>

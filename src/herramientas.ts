@@ -41,6 +41,11 @@ export const formatearDinero = (monto: number): string =>
 export const formatearFecha = (fecha: Date): string =>
   new Date(fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' });
 
+export const formatearFechaHora = (fecha: Date | string): string =>
+  new Date(fecha).toLocaleString('es-MX', {
+    day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
+  });
+
 /** Fecha -> "AAAA-MM-DD" (valor de <input type="date">). */
 export function aInputFecha(fecha: Date): string {
   const f = new Date(fecha);
@@ -174,5 +179,68 @@ export function pedirCampos(
     dlg.append(form);
     document.body.append(dlg);
     dlg.showModal();
+  });
+}
+
+export interface Confirmacion {
+  titulo: string;
+  mensaje: string;
+  /** Detalle opcional (antes/después, líneas de la venta, etc.). */
+  detalle?: string;
+  textoOk?: string;
+  peligro?: boolean;
+}
+
+/**
+ * Pide confirmación explícita antes de un cambio. Devuelve `true` solo si la
+ * persona pulsa el botón de confirmar.
+ */
+export function confirmarAccion(c: Confirmacion): Promise<boolean> {
+  return new Promise(resolve => {
+    const dlg = document.createElement('dialog');
+    dlg.className = 'x-dialogo x-confirmar';
+
+    const form = document.createElement('form');
+    form.className = 'x-form';
+
+    const h = document.createElement('h3');
+    h.textContent = c.titulo;
+    const p = document.createElement('p');
+    p.textContent = c.mensaje;
+    form.append(h, p);
+
+    if (c.detalle) {
+      const detalle = document.createElement('pre');
+      detalle.className = 'x-detalle';
+      detalle.textContent = c.detalle;
+      form.append(detalle);
+    }
+
+    const acciones = document.createElement('div');
+    acciones.className = 'x-acciones';
+    const cancelar = document.createElement('button');
+    cancelar.type = 'button';
+    cancelar.className = 'x-btn-sec';
+    cancelar.textContent = 'Cancelar';
+    const ok = document.createElement('button');
+    ok.type = 'submit';
+    ok.className = `x-btn${c.peligro ? ' x-peligro-btn' : ''}`;
+    ok.textContent = c.textoOk ?? 'Sí, confirmar';
+    acciones.append(cancelar, ok);
+    form.append(acciones);
+
+    let aceptado = false;
+    cancelar.addEventListener('click', () => dlg.close());
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      aceptado = true;
+      dlg.close();
+    });
+    dlg.addEventListener('close', () => { dlg.remove(); resolve(aceptado); });
+
+    dlg.append(form);
+    document.body.append(dlg);
+    dlg.showModal();
+    cancelar.focus();
   });
 }

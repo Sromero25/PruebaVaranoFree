@@ -15,11 +15,12 @@ import { obtenerVentasVista } from '../consultas.js';
 import { esAdmin } from '../auth.js';
 import {
   el, esc, notificar, mensajeDeError, formatearDinero, formatearFecha, compactarTallas,
-  obtenerOCrearVista, pedirCampos, aInputFecha, desdeInputFecha, type CampoDialogo
+  obtenerOCrearVista, pedirCampos, confirmarAccion, aInputFecha, desdeInputFecha,
+  type CampoDialogo
 } from '../herramientas.js';
 
 interface LineaCarrito {
-  IDTalla: number;
+  IDTalla: string;
   Talla: number;
   Modelo: string;
   Cantidad: number;
@@ -28,10 +29,10 @@ interface LineaCarrito {
 
 let carrito: LineaCarrito[] = [];
 let tallasModelo: Tallas[] = [];
-const nombresModelo = new Map<number, string>();
+const nombresModelo = new Map<string, string>();
 let alCambiar: () => Promise<void> = async () => {};
 
-const enCarrito = (idTalla: number): number =>
+const enCarrito = (idTalla: string): number =>
   carrito.filter(l => l.IDTalla === idTalla).reduce((acc, l) => acc + l.Cantidad, 0);
 
 // ---------------------------------------------------------------- montaje
@@ -81,7 +82,7 @@ export function montarVentasView(alCambiarDatos: () => Promise<void>): void {
     <section class="x-card">
       <h3>Historial de ventas</h3>
       <div class="x-tabla"><table>
-        <thead><tr><th>Fecha</th><th>Cliente</th><th>Modelo</th><th>Tallas</th><th class="right">Pares</th><th class="right">Total</th>${esAdmin() ? '<th></th>' : ''}</tr></thead>
+        <thead><tr><th>Fecha</th><th>Cliente</th><th>Modelo</th><th>Tallas</th><th class="right">Pares</th><th class="right">Total</th>${esAdmin() ? '<th class="right">Utilidad</th><th></th>' : ''}</tr></thead>
         <tbody id="tabla-ventas"></tbody>
       </table></div>
     </section>`;
@@ -105,7 +106,9 @@ export function montarVentasView(alCambiarDatos: () => Promise<void>): void {
   el('v-carrito')!.addEventListener('click', e => {
     const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-quitar]');
     if (!b) return;
-    carrito.splice(Number(b.dataset.quitar), 1);
+    const indice = Number(b.dataset.quitar ?? '-1');
+    if (!Number.isInteger(indice) || indice < 0) return;
+    carrito.splice(indice, 1);
     pintarCarrito();
   });
 
@@ -115,7 +118,8 @@ export function montarVentasView(alCambiarDatos: () => Promise<void>): void {
   el('tabla-ventas')!.addEventListener('click', e => {
     const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-accion]');
     if (!b || !esAdmin()) return;
-    const id = Number(b.dataset.id);
+    const id = String(b.dataset.id ?? '');
+    if (!id) return;
     void (b.dataset.accion === 'corregir' ? corregirVenta(id) : anularVenta(id));
   });
 
@@ -125,9 +129,12 @@ export function montarVentasView(alCambiarDatos: () => Promise<void>): void {
 // ---------------------------------------------------------------- selectores
 
 export async function actualizarSelectoresVentas(): Promise<void> {
-  const [clientes, modelos] = await Promise.all([db.clientes.toArray(), db.productos.toArray()]);
+  const [clientes, modelos] = await Promise.all([
+    db.clientes.filter(c => !c.deleted_at).toArray(),
+    db.productos.filter(p => !p.deleted_at).toArray()
+  ]);
   nombresModelo.clear();
-  modelos.forEach(m => nombresModelo.set(m.IDModelo as number, m.Modelo));
+  modelos.forEach(m => nombresModelo.set(m.IDModelo, m.Modelo));
 
   const selCliente = el<HTMLSelectElement>('v-cliente');
   const selModelo = el<HTMLSelectElement>('v-modelo');
@@ -144,12 +151,12 @@ export async function actualizarSelectoresVentas(): Promise<void> {
 }
 
 async function cargarTallasDelModelo(): Promise<void> {
-  const idModelo = Number(el<HTMLSelectElement>('v-modelo')?.value);
+  const idModelo = el<HTMLSelectElement>('v-modelo')?.value ?? '';
   const selTalla = el<HTMLSelectElement>('v-talla');
   const info = el('v-disponibles');
 
   tallasModelo = idModelo
-    ? (await db.tallas.where('IDModelo').equals(idModelo).toArray()).sort((a, b) => a.Talla - b.Talla)
+    ? (await db.tallas.where('IDModelo').equals(idModelo).filter(t => !t.deleted_at).toArray()).sort((a, b) => a.Talla - b.Talla)
     : [];
 
   if (selTalla) {
@@ -175,7 +182,7 @@ async function alElegirModelo(): Promise<void> {
 // ---------------------------------------------------------------- carrito
 
 function agregarAlCarrito(): void {
-  const idModelo = Number(el<HTMLSelectElement>('v-modelo')!.value);
+  const idModelo = el<HTMLSelectElement>('v-modelo')!.value;
   if (!idModelo) return notificar('Elige un modelo.', true);
 
   const crudoPrecio = el<HTMLInputElement>('v-precio')!.value;
@@ -196,7 +203,7 @@ function agregarAlCarrito(): void {
     if (hasta - desde > 60) return notificar('El rango de tallas es demasiado grande.', true);
     for (let n = desde; n <= hasta; n++) numeros.push(n);
   } else {
-    const idTalla = Number(el<HTMLSelectElement>('v-talla')!.value);
+    const idTalla = el<HTMLSelectElement>('v-talla')!.value;
     const t = tallasModelo.find(x => x.IDTalla === idTalla);
     if (!t) return notificar('Elige una talla.', true);
     numeros = [t.Talla];
@@ -210,7 +217,7 @@ function agregarAlCarrito(): void {
   for (const n of numeros) {
     const t = tallasModelo.find(x => x.Talla === n);
     if (!t) { faltantes.push(n); continue; }
-    const libres = t.Stock - enCarrito(t.IDTalla as number);
+    const libres = t.Stock - enCarrito(t.IDTalla);
     if (libres < cantidad) sinStock.push(`${n} (hay ${Math.max(libres, 0)})`);
     else validas.push(t);
   }
@@ -227,7 +234,7 @@ function agregarAlCarrito(): void {
   for (const t of validas) {
     const igual = carrito.find(l => l.IDTalla === t.IDTalla && l.Precio === precio);
     if (igual) igual.Cantidad += cantidad;
-    else carrito.push({ IDTalla: t.IDTalla as number, Talla: t.Talla, Modelo: modelo, Cantidad: cantidad, Precio: precio });
+    else carrito.push({ IDTalla: t.IDTalla, Talla: t.Talla, Modelo: modelo, Cantidad: cantidad, Precio: precio });
   }
   pintarCarrito();
 }
@@ -255,8 +262,23 @@ function pintarCarrito(): void {
 // ---------------------------------------------------------------- guardar
 
 async function guardarVenta(): Promise<void> {
-  const idCliente = Number(el<HTMLSelectElement>('v-cliente')!.value);
+  const idCliente = el<HTMLSelectElement>('v-cliente')!.value;
   if (!idCliente) return notificar('Elige un cliente.', true);
+  if (carrito.length === 0) return notificar('Agrega al menos un par a la venta.', true);
+
+  const total = carrito.reduce((acc, l) => acc + l.Cantidad * l.Precio, 0);
+  const pares = carrito.reduce((acc, l) => acc + l.Cantidad, 0);
+  const detalle = carrito.map(l =>
+    `${l.Modelo} · talla ${l.Talla} · ${l.Cantidad} par(es) × ${formatearDinero(l.Precio)} = ${formatearDinero(l.Cantidad * l.Precio)}`
+  ).join('\n');
+  const ok = await confirmarAccion({
+    titulo: 'Confirmar venta',
+    mensaje: '¿Estás seguro de guardar esta venta? Se descontará del inventario.',
+    detalle: `${detalle}\n\nTotal: ${formatearDinero(total)} (${pares} pares)`,
+    textoOk: 'Sí, guardar venta'
+  });
+  if (!ok) return;
+
   try {
     await registrarVentaDB(idCliente, carrito.map(l => ({ IDTalla: l.IDTalla, Cantidad: l.Cantidad, PrecioUnitario: l.Precio })));
     notificar('¡Venta guardada y stock descontado!');
@@ -271,8 +293,17 @@ async function guardarVenta(): Promise<void> {
 }
 
 async function guardarCliente(): Promise<void> {
+  const nombre = el<HTMLInputElement>('n-nombre')!.value;
+  if (esAdmin()) {
+    const ok = await confirmarAccion({
+      titulo: 'Confirmar cliente',
+      mensaje: '¿Estás seguro de guardar este cliente?',
+      detalle: `${nombre} ${el<HTMLInputElement>('n-apellido')!.value}\nTeléfono: ${el<HTMLInputElement>('n-telefono')!.value || '(sin teléfono)'}`,
+      textoOk: 'Sí, guardar cliente'
+    });
+    if (!ok) return;
+  }
   try {
-    const nombre = el<HTMLInputElement>('n-nombre')!.value;
     await crearClienteDB({
       Nombre: nombre,
       Apellido: el<HTMLInputElement>('n-apellido')!.value,
@@ -292,7 +323,7 @@ export async function renderVentasView(): Promise<void> {
   const tabla = el('tabla-ventas');
   if (!tabla) return;
   const ventas = await obtenerVentasVista();
-  const columnas = esAdmin() ? 7 : 6;
+  const columnas = esAdmin() ? 8 : 6;
 
   if (ventas.length === 0) {
     tabla.innerHTML = `<tr><td colspan="${columnas}" class="empty">Aún no hay ventas registradas.</td></tr>`;
@@ -302,22 +333,26 @@ export async function renderVentasView(): Promise<void> {
   tabla.innerHTML = ventas.map(v => {
     const modelos = [...new Set(v.lineas.map(l => l.Modelo))].join(', ') || 'S/M';
     const tallas = compactarTallas(v.lineas.map(l => l.Talla).filter((t): t is number => t !== null)) || '-';
-    const acciones = esAdmin()
+    const admin = esAdmin();
+    const utilidad = admin
+      ? `<td class="right" title="${v.ParesSinCosto > 0 ? `${v.ParesSinCosto} pares sin costo registrado` : 'Costo histórico de la venta'}">${formatearDinero(v.Utilidad)}</td>`
+      : '';
+    const acciones = admin
       ? `<td class="x-acciones-fila"><button class="x-btn-mini" data-accion="corregir" data-id="${v.IDVenta}">Corregir</button>
          <button class="x-btn-mini x-peligro" data-accion="anular" data-id="${v.IDVenta}">Anular</button></td>`
       : '';
     return `<tr>
       <td>${formatearFecha(v.Fecha)}</td><td>${esc(v.Cliente)}</td><td>${esc(modelos)}</td><td>${esc(tallas)}</td>
-      <td class="right">${v.Pares}</td><td class="right"><strong>${formatearDinero(v.Total)}</strong></td>${acciones}</tr>`;
+      <td class="right">${v.Pares}</td><td class="right"><strong>${formatearDinero(v.Total)}</strong></td>${utilidad}${acciones}</tr>`;
   }).join('');
 }
 
 // ---------------------------------------------------------------- admin: corregir / anular
 
-async function corregirVenta(idVenta: number): Promise<void> {
+async function corregirVenta(idVenta: string): Promise<void> {
   const venta = (await obtenerVentasVista()).find(v => v.IDVenta === idVenta);
   if (!venta) return notificar('La venta ya no existe.', true);
-  const clientes = await db.clientes.toArray();
+  const clientes = await db.clientes.filter(c => !c.deleted_at).toArray();
 
   const campos: CampoDialogo[] = [
     { nombre: 'cliente', etiqueta: 'Cliente', tipo: 'select', valor: String(venta.IDCliente),
@@ -335,14 +370,29 @@ async function corregirVenta(idVenta: number): Promise<void> {
 
   const r = await pedirCampos(`Corregir venta #${venta.IDVenta}`, campos);
   if (!r) return;
+
+  const cambios = venta.lineas.map(l => {
+    const cant = Number(r[`cant_${l.IDDetalle}`] ?? 0);
+    const precio = Number(r[`precio_${l.IDDetalle}`] ?? 0);
+    return `${l.Modelo} · talla ${l.Talla ?? '-'}: ${l.Cantidad} → ${cant} par(es), ${formatearDinero(l.PrecioUnitario)} → ${formatearDinero(precio)}`;
+  }).join('\n');
+  const ok = await confirmarAccion({
+    titulo: 'Confirmar corrección de venta',
+    mensaje: '¿Estás seguro de guardar esta corrección? Se ajustará el inventario.',
+    detalle: `Cliente: ${venta.Cliente} → ${clientes.find(c => String(c.IDCliente) === String(r.cliente))?.Nombre ?? ''}\nFecha: ${formatearFecha(venta.Fecha)} → ${r.fecha}\n\n${cambios}`,
+    textoOk: 'Sí, corregir venta',
+    peligro: true
+  });
+  if (!ok) return;
+
   try {
     await corregirVentaDB(idVenta, {
-      IDCliente: Number(r.cliente),
+      IDCliente: String(r.cliente ?? ''),
       Fecha: desdeInputFecha(r.fecha ?? ''),
       lineas: venta.lineas.map(l => ({
         IDDetalle: l.IDDetalle,
-        Cantidad: Number(r[`cant_${l.IDDetalle}`]),
-        PrecioUnitario: Number(r[`precio_${l.IDDetalle}`])
+        Cantidad: Number(r[`cant_${l.IDDetalle}`] ?? 0),
+        PrecioUnitario: Number(r[`precio_${l.IDDetalle}`] ?? 0)
       }))
     });
     notificar('Venta corregida y stock ajustado.');
@@ -353,8 +403,15 @@ async function corregirVenta(idVenta: number): Promise<void> {
   }
 }
 
-async function anularVenta(idVenta: number): Promise<void> {
-  if (!confirm('¿Anular esta venta? Los pares regresarán al inventario.')) return;
+async function anularVenta(idVenta: string): Promise<void> {
+  const ok = await confirmarAccion({
+    titulo: 'Anular venta',
+    mensaje: '¿Estás seguro de anular esta venta? Los pares regresarán al inventario.',
+    detalle: `Venta: ${idVenta}`,
+    textoOk: 'Sí, anular venta',
+    peligro: true
+  });
+  if (!ok) return;
   try {
     await anularVentaDB(idVenta);
     notificar('Venta anulada y stock devuelto.');

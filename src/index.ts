@@ -1,27 +1,20 @@
 /**
- * main.ts  (renómbralo a index.ts si tu index.html carga /src/index.ts)
+ * index.ts
  * ----------------------------------------------------------------------------
  * Punto de entrada. Flujo:
- *  1. Datos iniciales  2. Sesión guardada o pantalla de login
- *  3. Montar vistas según el rol  4. Primer pintado
- *
- * src/
- *  ├─ db.ts            base de datos y migración
- *  ├─ seguridad.ts     hash de contraseñas y tokens
- *  ├─ auth.ts          usuarios, sesión y permisos
- *  ├─ servicios.ts     operaciones que modifican datos (validadas)
- *  ├─ consultas.ts     lecturas con nombres resueltos
- *  ├─ herramientas.ts  toast, formato, escape de HTML, diálogos
- *  ├─ navegacion.ts    cambio de vistas y menú móvil
- *  ├─ extras.css       estilos de las vistas nuevas
- *  └─ views/           inicio, ventas, compras, inventario, resumen, admin, login
+ *  1. Abrir IndexedDB (y migrar datos viejos si existen).
+ *  2. Datos iniciales si la base está vacía.
+ *  3. Sesión cacheada o pantalla de login central.
+ *  4. Montar vistas según el rol, arrancar el motor de sincronización.
  */
 
 import './extras.css';
+import { inicializarBaseLocal } from './db.js';
 import { cargarDatosIniciales } from './seed.js';
-import { restaurarSesion } from './auth.js';
+import { esAdmin, restaurarSesion } from './auth.js';
 import { notificar } from './herramientas.js';
 import { inicializarNavegacion } from './navegacion.js';
+import { aplicarPermisosUI } from './permisos.js';
 
 import { mostrarLogin, montarBarraSesion } from './views/loginView.js';
 import { renderInicioView } from './views/inicioView.js';
@@ -30,23 +23,28 @@ import { montarComprasView, actualizarSelectoresCompras, renderComprasView } fro
 import { montarInventarioView, renderInventarioView } from './views/inventarioView.js';
 import { renderResumenView, inicializarResumenView } from './views/resumenView.js';
 import { montarAdminView, renderAdminView } from './views/adminView.js';
-import { sincronizarConBackend } from './sync.js';
+import { iniciarMotorSync } from './sync/engine.js';
+import { montarEstadoSync } from './sync/estadoView.js';
 
 /** Vuelve a pintar tablas y métricas de todas las vistas. */
 async function refrescarTodo(): Promise<void> {
-  await Promise.all([
+  const tareas: Promise<void>[] = [
     renderInicioView(),
     renderVentasView(),
-    renderComprasView(),
-    renderInventarioView(),
-    renderResumenView(),
-    renderAdminView()
-  ]);
+    renderInventarioView()
+  ];
+  // Compras, resumen y administración solo existen para administradores.
+  if (esAdmin()) {
+    tareas.push(renderComprasView(), renderResumenView(), renderAdminView());
+  }
+  await Promise.all(tareas);
 }
 
 /** Refresca y recarga los selectores (por si cambió un proveedor, material o modelo). */
 async function refrescarConSelectores(): Promise<void> {
-  await Promise.all([actualizarSelectoresVentas(), actualizarSelectoresCompras()]);
+  const tareas: Promise<void>[] = [actualizarSelectoresVentas()];
+  if (esAdmin()) tareas.push(actualizarSelectoresCompras());
+  await Promise.all(tareas);
   await refrescarTodo();
 }
 
@@ -54,20 +52,40 @@ async function iniciar(): Promise<void> {
   const app = document.getElementById('app');
   app?.style.setProperty('display', 'none'); // oculta la app hasta iniciar sesión
 
+  // El service worker permite abrir la app sin internet (solo en producción).
+  if ('serviceWorker' in navigator && import.meta.env.PROD) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js').catch(error => {
+        console.warn('No se pudo registrar el service worker:', error);
+      });
+    });
+  }
+
   try {
-    await cargarDatosIniciales();
+    await inicializarBaseLocal();
+    // Los datos de ejemplo son solo para demos: nunca se cargan por defecto.
+    if (import.meta.env.VITE_SEED_DEMO === 'true') await cargarDatosIniciales();
     if (!(await restaurarSesion())) await mostrarLogin();
 
     montarVentasView(refrescarConSelectores);
-    montarComprasView(refrescarConSelectores);
+    if (esAdmin()) montarComprasView(refrescarConSelectores);
     montarInventarioView(refrescarConSelectores);
     montarAdminView(refrescarConSelectores); // sólo existe para administradores
+    aplicarPermisosUI();
     montarBarraSesion();
+    montarEstadoSync();
     inicializarNavegacion();
-    inicializarResumenView();
+    if (esAdmin()) inicializarResumenView();
 
     app?.style.removeProperty('display');
     await refrescarConSelectores();
+    iniciarMotorSync(refrescarConSelectores);
+
+    // Otra pestaña del mismo equipo puede haber escrito en la misma base local.
+    window.addEventListener('focus', () => { void refrescarConSelectores(); });
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') void refrescarConSelectores();
+    });
   } catch (error) {
     console.error('Error al inicializar la app:', error);
     app?.style.removeProperty('display');
@@ -76,4 +94,3 @@ async function iniciar(): Promise<void> {
 }
 
 void iniciar();
-await sincronizarConBackend();

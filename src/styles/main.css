@@ -94,7 +94,7 @@ button, input, select { font: inherit; color: inherit; }
 .page-head p { color: var(--tinta-2); margin-top: .25rem; }
 
 .grid { display: grid; gap: 1rem; }
-.grid-kpi { grid-template-columns: repeat(4, 1fr); }
+.grid-kpi { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
 .grid-2 { grid-template-columns: 1fr 1fr; }
 .grid-main { grid-template-columns: 2fr 1fr; }
 .mt { margin-top: 1.25rem; }

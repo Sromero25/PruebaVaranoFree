@@ -6,15 +6,10 @@
  * #btn-imprimir.
  */
 
-import { obtenerVentasVista, obtenerComprasVista } from '../consultas.js';
+import { claveMes, obtenerVentasVista, obtenerComprasVista } from '../consultas.js';
 import { el, esc, formatearDinero } from '../herramientas.js';
 
 const TOP_MODELOS = 5;
-
-function claveMes(fecha: Date): string {
-  const f = new Date(fecha);
-  return `${f.getFullYear()}-${String(f.getMonth() + 1).padStart(2, '0')}`;
-}
 
 function setTexto(id: string, texto: string): void {
   const e = el(id);
@@ -28,22 +23,34 @@ export async function renderResumenView(): Promise<void> {
   const compras = todasCompras.filter(c => claveMes(c.Fecha) === mes);
 
   const ingresos = ventas.reduce((acc, v) => acc + v.Total, 0);
-  const gastos = compras.reduce((acc, c) => acc + c.Total, 0);
+  const costoVentas = ventas.reduce((acc, v) => acc + v.CostoTotal, 0);
+  const comprasInversion = compras.reduce((acc, c) => acc + c.Total, 0);
+  const paresSinCosto = ventas.reduce((acc, v) => acc + v.ParesSinCosto, 0);
 
   setTexto('r-ventas', formatearDinero(ingresos));
-  setTexto('r-compras', formatearDinero(gastos));
-  setTexto('r-utilidad', formatearDinero(ingresos - gastos));
+  setTexto('r-costo', formatearDinero(costoVentas));
+  setTexto('r-compras', formatearDinero(comprasInversion));
+  setTexto('r-utilidad', formatearDinero(ingresos - costoVentas));
   setTexto('r-pares', `${ventas.reduce((acc, v) => acc + v.Pares, 0)}`);
+
+  const aviso = el('r-aviso-costo');
+  if (aviso) {
+    aviso.hidden = paresSinCosto === 0;
+    aviso.textContent = paresSinCosto > 0
+      ? `Atención: ${paresSinCosto} pares vendidos no tienen costo registrado; la utilidad mostrada es mayor a la real.`
+      : '';
+  }
 
   const cont = el('r-top-modelos');
   if (!cont) return;
 
-  const porModelo = new Map<string, { pares: number; ingresos: number }>();
+  const porModelo = new Map<string, { pares: number; ingresos: number; utilidad: number }>();
   for (const v of ventas) {
     for (const l of v.lineas) {
-      const acc = porModelo.get(l.Modelo) ?? { pares: 0, ingresos: 0 };
+      const acc = porModelo.get(l.Modelo) ?? { pares: 0, ingresos: 0, utilidad: 0 };
       acc.pares += l.Cantidad;
       acc.ingresos += l.Cantidad * l.PrecioUnitario;
+      acc.utilidad += l.Utilidad;
       porModelo.set(l.Modelo, acc);
     }
   }
@@ -52,7 +59,7 @@ export async function renderResumenView(): Promise<void> {
   cont.innerHTML = ranking.length === 0
     ? '<p class="muted">Sin ventas en este mes.</p>'
     : ranking.map(([modelo, d], i) => `<div class="resumen-linea">
-        <span>${i + 1}. Modelo ${esc(modelo)}</span><strong>${d.pares} pares · ${formatearDinero(d.ingresos)}</strong></div>`).join('');
+        <span>${i + 1}. Modelo ${esc(modelo)}</span><strong>${d.pares} pares · ${formatearDinero(d.ingresos)} · utilidad ${formatearDinero(d.utilidad)}</strong></div>`).join('');
 }
 
 export function inicializarResumenView(): void {
