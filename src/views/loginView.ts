@@ -13,7 +13,7 @@
 
 import {
   estadoSistema, crearUsuario, iniciarSesion, cerrarSesion,
-  obtenerUsuarioActual, registrarUsuario
+  obtenerUsuarioActual, registrarUsuario, type EstadoSistema
 } from '../auth.js';
 import { mensajeDeError } from '../herramientas.js';
 
@@ -30,15 +30,32 @@ const mensajeError = (form: HTMLFormElement): HTMLElement =>
   form.querySelector('.x-error') as HTMLElement;
 
 export async function mostrarLogin(): Promise<void> {
-  const estado = await estadoSistema();
+  // Pintamos algo de inmediato: si el servidor está despertando, el usuario ve
+  // que la app está trabajando en vez de una pantalla en blanco.
+  const capa = document.createElement('div');
+  capa.className = 'x-login';
+  capa.innerHTML = htmlConectando();
+  document.body.append(capa);
+
+  const avisoLento = window.setTimeout(() => {
+    const texto = capa.querySelector('#txt-conectando');
+    if (texto) {
+      texto.textContent = 'El servidor está despertando. La primera conexión del día puede tardar hasta un minuto…';
+    }
+  }, 6_000);
+
+  let estado: EstadoSistema;
+  try {
+    estado = await estadoSistema();
+  } catch {
+    estado = 'sin_conexion';
+  }
+  window.clearTimeout(avisoLento);
+
   const sinConexion = estado === 'sin_conexion';
+  capa.innerHTML = estado === 'sin_usuarios' ? htmlPrimeraVez() : htmlAcceso(sinConexion);
 
   return new Promise<void>(resolve => {
-    const capa = document.createElement('div');
-    capa.className = 'x-login';
-    capa.innerHTML = estado === 'sin_usuarios' ? htmlPrimeraVez() : htmlAcceso(sinConexion);
-    document.body.append(capa);
-
     const entrar = (): void => {
       capa.remove();
       resolve();
@@ -47,6 +64,17 @@ export async function mostrarLogin(): Promise<void> {
     if (estado === 'sin_usuarios') montarPrimeraVez(capa, entrar);
     else montarAcceso(capa, entrar, sinConexion);
   });
+}
+
+// ---------------------------------------------------------------- conectando
+
+function htmlConectando(): string {
+  return `
+    <div class="x-login-card x-conectando" role="status" aria-live="polite">
+      <h2>Taller de Calzado</h2>
+      <p class="x-nota" id="txt-conectando">Conectando con el servidor…</p>
+      <div class="x-spinner" aria-hidden="true"></div>
+    </div>`;
 }
 
 // ---------------------------------------------------------------- primera vez
@@ -105,7 +133,7 @@ function htmlAcceso(sinConexion: boolean): string {
 
       ${sinConexion ? `<div class="x-aviso-servidor" role="alert">
         <strong>Sin conexión con el servidor</strong>
-        <p>No se pudo consultar el sistema. Si ya iniciaste sesión antes, puedes seguir trabajando sin conexión; para entrar por primera vez o crear una cuenta necesitas internet.</p>
+        <p>No se pudo consultar el sistema. Si el servicio estuvo inactivo, la primera conexión puede tardar hasta un minuto: pulsa <em>Reintentar</em>. Si ya iniciaste sesión antes, puedes seguir trabajando sin conexión.</p>
         <button type="button" class="x-btn-sec" id="btn-reintentar">Reintentar conexión</button>
       </div>` : `
       <div class="x-login-tabs" role="tablist" aria-label="Acceso">

@@ -9,7 +9,7 @@
  *    rápido para que el motor use la cola local.
  */
 
-const CACHE = 'varano-shell-v2';
+const CACHE = 'varano-shell-v3';
 const SHELL = ['/', '/index.html'];
 
 self.addEventListener('install', event => {

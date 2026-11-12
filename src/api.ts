@@ -8,10 +8,30 @@
 
 import type { EntidadSync } from './db.js';
 
-const BASE = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '')
-  ?? (import.meta.env.DEV
+/**
+ * Normaliza la URL del API para que siempre termine en `/api`.
+ *
+ * Así funciona igual si `VITE_API_URL` se configura como
+ * `https://mi-api.onrender.com` o como `https://mi-api.onrender.com/api`
+ * (con o sin barra final). Evita el 404 por omitir o duplicar el prefijo.
+ */
+function normalizarBase(url: string): string {
+  const base = url.trim().replace(/\/+$/, '');
+  return /\/api$/i.test(base) ? base : `${base}/api`;
+}
+
+const URL_CONFIGURADA = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
+
+const BASE = normalizarBase(
+  URL_CONFIGURADA || (import.meta.env.DEV
     ? 'http://localhost:3000/api'
-    : 'https://varano-api.onrender.com/api');
+    : 'https://varano-api.onrender.com/api')
+);
+
+/** Tiempo máximo de espera normal. El plan gratis de Render despierta lento. */
+const TIEMPO_LIMITE_MS = 30_000;
+/** La primera consulta puede coincidir con el arranque del servidor. */
+const TIEMPO_LIMITE_ARRANQUE_MS = 45_000;
 
 export class ApiError extends Error {
   readonly estado: number;
@@ -33,7 +53,11 @@ export function leerTokenApi(): string | null {
   }
 }
 
-async function apiFetch<T>(ruta: string, opciones: RequestInit = {}): Promise<T> {
+async function apiFetch<T>(
+  ruta: string,
+  opciones: RequestInit = {},
+  tiempoLimite = TIEMPO_LIMITE_MS
+): Promise<T> {
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
     throw new ApiError('No hay conexión con el servidor.', 0);
   }
@@ -46,12 +70,18 @@ async function apiFetch<T>(ruta: string, opciones: RequestInit = {}): Promise<T>
   if (token) cabeceras.set('Authorization', `Bearer ${token}`);
 
   let respuesta: Response;
+  let seAgotoElTiempo = false;
   const control = new AbortController();
-  const temporizador = setTimeout(() => control.abort(), 12_000);
+  const temporizador = setTimeout(() => {
+    seAgotoElTiempo = true;
+    control.abort();
+  }, tiempoLimite);
   try {
     respuesta = await fetch(`${BASE}${ruta}`, { ...opciones, headers: cabeceras, signal: control.signal });
   } catch {
-    throw new ApiError('No hay conexión con el servidor.', 0);
+    throw seAgotoElTiempo
+      ? new ApiError('El servidor tardó demasiado en responder. Puede estar despertando; intenta de nuevo.', 0)
+      : new ApiError('No hay conexión con el servidor.', 0);
   } finally {
     clearTimeout(temporizador);
   }
@@ -93,25 +123,26 @@ export interface RespuestaLogin {
 }
 
 export const api = {
-  estado: () => apiFetch<{ inicializado: boolean }>('/auth/estado'),
+  // El arranque del servidor gratuito puede tardar; damos más margen.
+  estado: () => apiFetch<{ inicializado: boolean }>('/auth/estado', {}, TIEMPO_LIMITE_ARRANQUE_MS),
 
   bootstrap: (datos: { usuario: string; nombre: string; password: string }) =>
     apiFetch<{ usuario: UsuarioApi }>('/auth/bootstrap', {
       method: 'POST',
       body: JSON.stringify(datos)
-    }),
+    }, TIEMPO_LIMITE_ARRANQUE_MS),
 
   login: (usuario: string, password: string) =>
     apiFetch<RespuestaLogin>('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ usuario, password })
-    }),
+    }, TIEMPO_LIMITE_ARRANQUE_MS),
 
   registro: (datos: { usuario: string; nombre: string; password: string; codigo_admin?: string }) =>
     apiFetch<RespuestaLogin>('/auth/registro', {
       method: 'POST',
       body: JSON.stringify(datos)
-    }),
+    }, TIEMPO_LIMITE_ARRANQUE_MS),
 
   logout: () => apiFetch<{ estado: string }>('/auth/logout', { method: 'POST' }),
 

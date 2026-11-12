@@ -55,7 +55,7 @@ async function iniciar(): Promise<void> {
   // El service worker permite abrir la app sin internet (solo en producción).
   if ('serviceWorker' in navigator && import.meta.env.PROD) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('/sw.js').catch(error => {
+      navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).catch(error => {
         console.warn('No se pudo registrar el service worker:', error);
       });
     });

@@ -58,6 +58,14 @@
 .x-login-tab { flex: 1; font: inherit; cursor: pointer; padding: .55rem .7rem; border-radius: 999px; border: 1px solid var(--x-borde); background: #fff; color: var(--x-suave); }
 .x-login-tab.activo { background: var(--x-verde); border-color: var(--x-verde); color: #fff; font-weight: 600; }
 .x-login-card .x-nota { line-height: 1.4; }
+.x-conectando { text-align: center; }
+.x-spinner {
+  width: 22px; height: 22px; margin: .2rem auto 0;
+  border: 3px solid #d8d2c4; border-top-color: #8a6a2f; border-radius: 50%;
+  animation: x-girar .8s linear infinite;
+}
+@keyframes x-girar { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .x-spinner { animation: none; } }
 .x-aviso-servidor { margin: .9rem 0 1.1rem; padding: .7rem .8rem; border-radius: 8px; border: 1px solid #e6c07a; background: #fdf4e2; color: #6b4a10; font-size: .85rem; }
 .x-aviso-servidor p { margin: .3rem 0 .55rem; }
 .x-aviso-servidor .x-btn-sec { font: inherit; cursor: pointer; padding: .35rem .7rem; border-radius: 8px; border: 1px solid #b98a2e; background: #fff; color: #6b4a10; }
