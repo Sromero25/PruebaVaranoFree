@@ -1,6 +1,6 @@
 import { db } from './db.js';
 
-const BACKEND_URL = 'http://localhost:3000/api';
+const BACKEND_URL = 'https://varano-api.onrender.com/api';
 
 export async function sincronizarConBackend(): Promise<void> {
   try {
