@@ -50,7 +50,11 @@ const limiteLogin = rateLimit({
   message: { error: 'Demasiados intentos de acceso. Espera 15 minutos.' }
 });
 
-app.get('/api/health', async (_req: Request, res: Response, next: NextFunction) => {
+app.get('/api/health', (_req: Request, res: Response) => {
+  res.status(200).json({ estado: 'ok', mensaje: 'Servidor activo' });
+});
+
+app.get('/api/health/db', async (_req: Request, res: Response, next: NextFunction) => {
   try {
     const [rows]: any = await pool.query('SELECT 1 + 1 AS test');
     res.json({ estado: 'ok', mensaje: 'Servidor y MySQL conectados', datos: rows });

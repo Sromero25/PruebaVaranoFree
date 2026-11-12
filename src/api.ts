@@ -9,7 +9,9 @@
 import type { EntidadSync } from './db.js';
 
 const BASE = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '')
-  ?? (import.meta.env.DEV ? 'http://localhost:3000/api' : '/api');
+  ?? (import.meta.env.DEV
+    ? 'http://localhost:3000/api'
+    : 'https://varano-api.onrender.com/api');
 
 export class ApiError extends Error {
   readonly estado: number;
