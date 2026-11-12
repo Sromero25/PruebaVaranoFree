@@ -1,0 +1,35 @@
+# Blueprint de Render para la API de Varano.
+# Render crea el servicio web; la base MySQL se configura aparte (Aiven, Railway, etc.)
+# y se capturan sus datos en las variables marcadas con sync: false.
+services:
+  - type: web
+    name: varano-api
+    runtime: node
+    plan: free
+    rootDir: backend
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start:prod
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        value: "3306"
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_NAME
+        sync: false
+      - key: DB_SSL
+        value: "true"
+      - key: DB_POOL
+        value: "5"
+      - key: SESSION_DAYS
+        value: "30"
+      - key: CORS_ORIGIN
+        value: https://*.vercel.app,http://localhost:5173,http://localhost:4173
+      - key: ADMIN_INVITE_CODE
+        sync: false
